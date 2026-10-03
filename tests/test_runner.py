@@ -60,6 +60,8 @@ async def test_template_error_is_case_error_and_others_continue():
     client = FakeClient([])
     run = await run_harness(h, ModelRef(provider="p", model="m"), {"p": PROV}, client)
     assert [r.status for r in run.results] == ["error", "error"]
+    assert client.calls == []
+    assert all("nope" in r.error for r in run.results)
     h2 = Harness(
         name="h",
         prompt=PROMPT,
@@ -90,11 +92,15 @@ async def test_unexpected_exception_is_error():
 
 async def test_missing_provider_errors_all_cases():
     h = Harness(name="h", prompt=PROMPT, cases=[case("a"), case("b")])
-    run = await run_harness(h, ModelRef(provider="nope", model="m"), {}, FakeClient([]))
+    client = FakeClient([])
+    run = await run_harness(h, ModelRef(provider="nope", model="m"), {}, client)
     assert [r.status for r in run.results] == ["error", "error"]
+    assert all(r.error.startswith("config: provider 'nope' is unknown") for r in run.results)
     off = PROV.model_copy(update={"enabled": False})
-    run = await run_harness(h, ModelRef(provider="p", model="m"), {"p": off}, FakeClient([]))
+    run = await run_harness(h, ModelRef(provider="p", model="m"), {"p": off}, client)
     assert [r.status for r in run.results] == ["error", "error"]
+    assert all("is disabled" in r.error for r in run.results)
+    assert client.calls == []
 
 
 async def test_judge_skipped_after_deterministic_failure():
@@ -121,6 +127,7 @@ async def test_judge_error_status_on_malformed_judge():
     c = case(judge_prompt="good?")
     r, _ = await ev(c, ["hi", "garbage", "garbage"], judge=(PROV, "j"))
     assert r.status == "judge_error" and r.error is None
+    assert any("malformed" in w for w in r.warnings)
 
 
 async def test_judge_client_error_is_case_error():
@@ -233,3 +240,50 @@ async def test_run_matrix_returns_run_per_target():
     )
     assert [str(r.model) for r in runs] == ["p:m1", "p:m2"]
     assert seen == [("p:m1", "a"), ("p:m2", "a")]
+
+
+@pytest.mark.parametrize("enabled,providers_has,word", [(False, True, "disabled"), (True, False, "unknown")])
+async def test_unavailable_judge_provider_is_judge_error(enabled, providers_has, word):
+    jp = PROV.model_copy(update={"name": "jp", "enabled": enabled})
+    provs = {"p": PROV, **({"jp": jp} if providers_has else {})}
+    h = Harness(
+        name="h",
+        prompt=PROMPT,
+        cases=[
+            case("a", must_include=[Match(pattern="o")], judge_prompt="g"),
+            case("b", judge_prompt="g"),
+            case("c", must_include=[Match(pattern="zzz")], judge_prompt="g"),
+            case("d"),
+        ],
+    )
+    client = FakeClient(["ok"] * 4)
+    run = await run_harness(
+        h,
+        ModelRef(provider="p", model="m"),
+        provs,
+        client,
+        judge_model=ModelRef(provider="jp", model="j"),
+    )
+    assert [r.status for r in run.results] == ["judge_error", "judge_error", "fail", "manual"]
+    assert word in run.results[0].warnings[-1] and "'jp'" in run.results[0].warnings[-1]
+    assert run.results[3].warnings == []
+
+
+async def test_raising_on_result_does_not_lose_results():
+    def boom(r):
+        raise RuntimeError("cb")
+
+    h = Harness(name="h", prompt=PROMPT, cases=[case("a"), case("b")])
+    run = await run_harness(
+        h, ModelRef(provider="p", model="m"), {"p": PROV}, FakeClient(["1", "2"]), on_result=boom
+    )
+    assert [r.output for r in run.results] == ["1", "2"]
+    assert all("on_result failed: RuntimeError: cb" in r.warnings for r in run.results)
+
+
+async def test_unknown_only_case_raises():
+    h = Harness(name="h", prompt=PROMPT, cases=[case("a")])
+    client = FakeClient([])
+    with pytest.raises(ValueError, match="unknown case 'zz'"):
+        await run_harness(h, ModelRef(provider="p", model="m"), {"p": PROV}, client, only_case="zz")
+    assert client.calls == []

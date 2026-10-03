@@ -70,6 +70,7 @@ async def _evaluate(
     checks: list[CheckResult] = run_checks(chat.text, exp)
 
     judge_error = False
+    judge_warning: str | None = None
     error: str | None = None
     if judge is not None and exp.judge_prompt and all(c.passed for c in checks):
         jprov, jmodel = judge
@@ -77,8 +78,9 @@ async def _evaluate(
             checks.append(
                 await run_judge(client, jprov, jmodel, exp.judge_prompt, case.input, chat.text)
             )
-        except JudgeError:
+        except JudgeError as e:
             judge_error = True
+            judge_warning = str(e)
         except ClientError as e:
             error = f"{e.kind}: {e}"
 
@@ -92,7 +94,7 @@ async def _evaluate(
         prompt_tokens=chat.prompt_tokens,
         completion_tokens=chat.completion_tokens,
         checks=checks,
-        warnings=list(chat.warnings),
+        warnings=list(chat.warnings) + ([f"judge: {judge_warning}"] if judge_warning else []),
         error=error,
     )
 
@@ -111,16 +113,22 @@ async def run_harness(
     on_result: Callable[[CaseResult], None] | None = None,
     only_case: str | None = None,
 ) -> Run:
+    if only_case is not None and all(c.name != only_case for c in harness.cases):
+        raise ValueError(f"unknown case {only_case!r}")
     started = _now()
     cases = [c for c in harness.cases if only_case is None or c.name == only_case]
     provider = providers.get(target.provider)
     usable = provider is not None and provider.enabled
 
     judge: tuple[Provider, str] | None = None
+    judge_unavailable: str | None = None
     if judge_model is not None:
         jp = providers.get(judge_model.provider)
         if jp is not None and jp.enabled:
             judge = (jp, judge_model.model)
+        else:
+            why = "disabled" if jp is not None else "unknown"
+            judge_unavailable = f"config: judge provider {judge_model.provider!r} is {why}"
 
     sem = asyncio.Semaphore(max(1, settings.concurrency))
 
@@ -133,8 +141,18 @@ async def run_harness(
                 result = await evaluate_case(
                     case, harness.prompt, provider, target.model, client, judge
                 )
+        if (
+            judge_unavailable
+            and case.expectation.judge_prompt
+            and result.status in ("pass", "manual")
+        ):
+            result.status = final_status(result.checks, None, True, None)
+            result.warnings.append(judge_unavailable)
         if on_result is not None:
-            on_result(result)
+            try:
+                on_result(result)
+            except Exception as e:
+                result.warnings.append(f"on_result failed: {type(e).__name__}: {e}")
         return result
 
     results = await asyncio.gather(*(one(c) for c in cases))
