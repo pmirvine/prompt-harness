@@ -39,6 +39,27 @@ promptharness            # or: uv run promptharness
 
 `promptharness --help` lists the subcommands (`run`, `export`, `import`, `provider`).
 
+## Quickstart
+
+The repo ships a starter harness, [`examples/quickstart.harness.yaml`](examples/quickstart.harness.yaml): three tiny deterministic cases (a fact, a JSON extraction, a formatting rule) that any chat model should pass. It has no accepted model, so you choose what to try. With a local server such as LM Studio, Ollama or vLLM running:
+
+```sh
+# 1. Register the server (no API key needed locally); LM Studio's default port is 1234
+promptharness provider add lmstudio --base-url http://localhost:1234/v1
+
+# 2. Load the starter harness
+promptharness import examples/quickstart.harness.yaml
+
+# 3. Run it against a model you have loaded (provider:model)
+promptharness run quickstart --model lmstudio:your-model-id
+```
+
+You should see three `pass` rows and exit code 0. A failure prints the reason underneath the table. Add `--judge lmstudio:your-model-id` to also exercise the LLM judge once you add a `judge_prompt` to a case.
+
+In the TUI the same steps are: `4` then `a` to add the provider, `t` to fetch its models, `1` then `i` to import `examples/quickstart.harness.yaml`, and `m` to run it against one or more models.
+
+**Reasoning models** (those that "think" before answering) spend part of `max_tokens` on hidden reasoning. If the limit is too low they return an empty answer. The quickstart sets `max_tokens: 2048` for this reason, and a result that hit the limit carries a warning such as `empty answer: the model used its token limit ... raise max_tokens`.
+
 ## API keys and environment variables
 
 PromptHarness stores only the **name** of the environment variable that holds a provider's key, never the key itself. The key is read from the environment at the moment each request is made, so export it in the shell you launch from:
@@ -65,6 +86,7 @@ Providers are managed on the Providers tab (`4`) or with `promptharness provider
 | Together   | `together`   | `https://api.together.xyz/v1`     | `TOGETHER_API_KEY`   |
 | vLLM (local)   | `vllm`   | `http://localhost:8000/v1`        | none (leave empty)   |
 | Ollama (local) | `ollama` | `http://localhost:11434/v1`       | none (leave empty)   |
+| LM Studio (local) | `lmstudio` | `http://localhost:1234/v1`   | none (leave empty)   |
 
 In the TUI: press `4`, then `a`, fill in Name, Base URL and the API key env var **name** (empty for a local server), and save. Then press `t` to test the connection; on success the provider's model list is fetched and stored. If listing fails (some servers do not expose `/models`), the models editor opens so you can type model ids one per line (`m` reopens it later).
 

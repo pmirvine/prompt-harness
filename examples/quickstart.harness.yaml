@@ -1,0 +1,49 @@
+format_version: 1
+name: quickstart
+description: >-
+  Starter harness for a first run - three tiny deterministic cases (a fact, a
+  JSON extraction, a formatting rule) that any chat model should pass. It has
+  no accepted model, so pick whichever model you want to try.
+prompt:
+  system: You are a precise assistant. Follow the requested output format exactly and answer with nothing else.
+  template: |-
+    {{ input }}
+  temperature: 0.0
+  # Generous on purpose: reasoning models spend tokens thinking before they
+  # answer, and a small limit leaves them with an empty reply.
+  max_tokens: 2048
+cases:
+  - name: capital-of-france
+    input: What is the capital of France? Answer with just the city name.
+    notes: A basic fact check using must-include and must-not-include.
+    expectation:
+      must_include:
+        - pattern: Paris
+      must_not_include:
+        - pattern: London
+  - name: extract-person-json
+    input: |-
+      Extract the person's details from the text and reply with only a JSON
+      object with the keys "name" (string) and "age" (integer).
+
+      Ada Lovelace was 36 years old when she died.
+    notes: Output must be valid JSON matching the schema.
+    expectation:
+      json_output: true
+      json_schema:
+        type: object
+        required: [name, age]
+        properties:
+          name:
+            type: string
+          age:
+            type: integer
+  - name: three-colors
+    input: >-
+      List exactly three different colors, lowercase, separated by commas,
+      with no other text.
+    notes: A formatting rule checked with a regex.
+    expectation:
+      must_include:
+        - pattern: '^\s*[a-z]+\s*,\s*[a-z]+\s*,\s*[a-z]+\s*$'
+          regex: true
