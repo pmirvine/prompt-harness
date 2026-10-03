@@ -98,6 +98,19 @@ PromptHarness stores only the **name** of the environment variable that holds a 
 
 The env var name is whatever you enter when adding the provider; the names above are conventions. If a provider has an env var name and that variable is unset, its requests fail with a per-case `error` ("environment variable ... is not set"). A local server such as vLLM or Ollama needs no env var: leave the name empty (omit `--api-key-env` on the CLI) and a placeholder key is sent.
 
+### Using a `.env` file
+
+[`.env.sample`](.env.sample) lists the base URL and key variable for OpenAI, Anthropic, Google Gemini, Amazon Bedrock, OpenRouter, Groq, Together, Mistral, xAI, DeepSeek, and local servers (LM Studio, Ollama, vLLM, llama.cpp). PromptHarness does not read `.env` files itself, so load it into your shell first:
+
+```sh
+cp .env.sample .env          # .env is git-ignored
+$EDITOR .env                 # replace the placeholder keys you need
+set -a; source .env; set +a  # export the variables into this shell
+promptharness provider add openai --base-url "$OPENAI_BASE_URL" --api-key-env OPENAI_API_KEY
+```
+
+Anthropic, Gemini and Bedrock are reached through their OpenAI-compatible endpoints, which can ignore or reject some OpenAI parameters; check each provider's documentation.
+
 ## Provider setup
 
 Providers are managed on the Providers tab (`4`) or with `promptharness provider add`.
