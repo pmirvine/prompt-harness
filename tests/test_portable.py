@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from promptharness.core.db import Database
@@ -220,3 +222,23 @@ def test_accepted_outputs_unknown_case_rejected(db):
     with pytest.raises(PortableError, match="ghost"):
         import_harness(db, text)
     assert db.list_harnesses() == []
+
+
+EXAMPLE = Path(__file__).resolve().parent.parent / "examples" / "summarize.harness.yaml"
+
+
+def test_example_harness_parses():
+    harness, outputs = parse_harness(EXAMPLE.read_text(encoding="utf-8"))
+    assert len(harness.cases) == 2
+    assert harness.accepted_model is not None
+    assert set(outputs) == {c.name for c in harness.cases}
+    assert all(not c.documents for c in harness.cases)
+    exps = [c.expectation for c in harness.cases]
+    assert any(e.must_include for e in exps)
+    assert any(e.json_schema for e in exps)
+
+
+def test_example_harness_imports(db):
+    h = import_harness(db, EXAMPLE.read_text(encoding="utf-8"))
+    assert h.accepted_run_id is not None
+    assert len(h.cases) == 2
