@@ -1,0 +1,49 @@
+Screen { background: #101216; color: #d0d4dc; }
+TabbedContent { height: 1fr; }
+TabPane { padding: 0 1; }
+Tabs { background: #181b22; }
+Tab.-active { color: #7fd1b9; text-style: bold; }
+DataTable { height: 1fr; background: #101216; }
+DataTable > .datatable--header { background: #1c2028; text-style: bold; }
+DataTable > .datatable--cursor { background: #2a3a4a; }
+Footer { background: #181b22; }
+ProvidersPane { height: 1fr; }
+ProviderForm, ModelsForm { align: center middle; }
+#form { width: 64; height: auto; padding: 1 2; border: round #4a5568; background: #181b22; }
+#form Label { margin-top: 1; color: #8a93a3; }
+#form TextArea { height: 8; }
+#buttons { height: auto; margin-top: 1; }
+#buttons Button { margin-right: 2; }
+StudioPane { height: 1fr; }
+#studio-top { height: 3; }
+#studio-top Select { width: 1fr; }
+#manual-model { width: 26; }
+#temperature, #max_tokens { width: 14; }
+#studio-body { height: 1fr; }
+#studio-editors { width: 1fr; }
+#studio-editors Label, #studio-side Label { color: #8a93a3; }
+#system { height: 1fr; }
+#template { height: 2fr; }
+#studio-side { width: 1fr; }
+#cases { height: 10; border: round #4a5568; background: #101216; }
+#cases:focus { border: round #7fd1b9; }
+#output { height: 1fr; border: round #4a5568; background: #0c0e12; }
+CaseForm, SaveForm, ConfirmModal, VerdictModal { align: center middle; }
+#case-form { width: 72; height: 90%; padding: 1 2; border: round #4a5568; background: #181b22; }
+#case-form Label { margin-top: 1; color: #8a93a3; }
+#case-form TextArea { height: 5; }
+HarnessesPane, RunsPane { height: 1fr; }
+RegressionForm, ExportForm, ImportForm { align: center middle; }
+#regression-models { height: 8; border: round #4a5568; background: #101216; }
+.form-error { color: #ff6b6b; }
+#matrix-title, #detail-title { color: #7fd1b9; text-style: bold; padding: 0 1; }
+#matrix-status { color: #8a93a3; padding: 0 1; }
+#matrix { height: 1fr; }
+#detail-scroll { height: 1fr; padding: 0 1; }
+#form.compact Label { margin-top: 0; }
+#compare-title { color: #7fd1b9; text-style: bold; padding: 0 1; }
+#compare-panes { height: 1fr; }
+.compare-pane { width: 1fr; height: 1fr; border: round #4a5568; padding: 0 1; }
+.compare-pane:focus { border: round #7fd1b9; }
+.compare-head { margin-bottom: 1; }
+RetestForm { align: center middle; }

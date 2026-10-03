@@ -1,0 +1,289 @@
+import asyncio
+
+import pytest
+from conftest import FakeClient
+
+from promptharness.core.client import ChatResult, ClientError
+from promptharness.core.models import (
+    Case,
+    Expectation,
+    Harness,
+    Match,
+    ModelRef,
+    PromptVersion,
+    Provider,
+)
+from promptharness.core.runner import RunSettings, evaluate_case, run_harness, run_matrix
+
+PROV = Provider(name="p", base_url="http://x", api_key_env="K")
+PROMPT = PromptVersion(system="sys", template="Say: {{ input }}")
+
+
+def case(name="c", input="hi", **exp):
+    return Case(name=name, input=input, expectation=Expectation(**exp))
+
+
+async def ev(c, script, judge=None, prompt=PROMPT):
+    client = FakeClient(script)
+    r = await evaluate_case(c, prompt, PROV, "m", client, judge)
+    return r, client
+
+
+async def test_pass_when_checks_pass():
+    r, _ = await ev(case(must_include=[Match(pattern="hi")]), ["hi there"])
+    assert r.status == "pass" and r.output == "hi there"
+
+
+async def test_fail_when_must_include_missing():
+    r, _ = await ev(case(must_include=[Match(pattern="zzz")]), ["hi there"])
+    assert r.status == "fail"
+
+
+async def test_manual_when_no_expectations():
+    r, _ = await ev(case(), ["whatever"])
+    assert r.status == "manual"
+
+
+async def test_system_omitted_if_empty():
+    r, c = await ev(case(), ["x"], prompt=PromptVersion(template="{{ input }}"))
+    assert [m["role"] for m in c.calls[0]["messages"]] == ["user"]
+    r, c = await ev(case(), ["x"])
+    assert [m["role"] for m in c.calls[0]["messages"]] == ["system", "user"]
+
+
+async def test_template_error_is_case_error_and_others_continue():
+    h = Harness(
+        name="h",
+        prompt=PromptVersion(template="{{ nope.x }}"),
+        cases=[case("a"), case("b")],
+    )
+    client = FakeClient([])
+    run = await run_harness(h, ModelRef(provider="p", model="m"), {"p": PROV}, client)
+    assert [r.status for r in run.results] == ["error", "error"]
+    assert client.calls == []
+    assert all("nope" in r.error for r in run.results)
+    h2 = Harness(
+        name="h",
+        prompt=PROMPT,
+        cases=[Case(name="a", input="x", documents=["/nonexistent/zz"]), case("b")],
+    )
+    run = await run_harness(h2, ModelRef(provider="p", model="m"), {"p": PROV}, FakeClient(["ok"]))
+    assert [r.status for r in run.results] == ["error", "manual"]
+
+
+async def test_document_error_is_case_error(tmp_path):
+    f = tmp_path / "b.bin"
+    f.write_bytes(b"\x00\x01")
+    c = Case(name="c", documents=[str(f)])
+    r, _ = await ev(c, ["x"])
+    assert r.status == "error" and "binary" in r.error
+
+
+@pytest.mark.parametrize("kind", ["auth", "timeout", "rate_limit", "config", "other"])
+async def test_client_errors_become_case_errors(kind):
+    r, _ = await ev(case(), [ClientError(kind, "boom")])
+    assert r.status == "error" and r.error == f"{kind}: boom"
+
+
+async def test_unexpected_exception_is_error():
+    r, _ = await ev(case(), [RuntimeError("bad")])
+    assert r.status == "error" and r.error == "RuntimeError: bad"
+
+
+async def test_missing_provider_errors_all_cases():
+    h = Harness(name="h", prompt=PROMPT, cases=[case("a"), case("b")])
+    client = FakeClient([])
+    run = await run_harness(h, ModelRef(provider="nope", model="m"), {}, client)
+    assert [r.status for r in run.results] == ["error", "error"]
+    assert all(r.error.startswith("config: provider 'nope' is unknown") for r in run.results)
+    off = PROV.model_copy(update={"enabled": False})
+    run = await run_harness(h, ModelRef(provider="p", model="m"), {"p": off}, client)
+    assert [r.status for r in run.results] == ["error", "error"]
+    assert all("is disabled" in r.error for r in run.results)
+    assert client.calls == []
+
+
+async def test_judge_skipped_after_deterministic_failure():
+    c = case(must_include=[Match(pattern="zzz")], judge_prompt="good?")
+    r, client = await ev(c, ["hi"], judge=(PROV, "j"))
+    assert r.status == "fail" and len(client.calls) == 1
+
+
+async def test_judge_skipped_when_none_or_no_prompt():
+    r, client = await ev(case(judge_prompt="g"), ["hi"], judge=None)
+    assert len(client.calls) == 1 and r.status == "manual"
+    r, client = await ev(case(), ["hi"], judge=(PROV, "j"))
+    assert len(client.calls) == 1
+
+
+async def test_judge_runs_and_passes():
+    c = case(judge_prompt="good?")
+    r, client = await ev(c, ["hi", '{"pass": true, "reason": "ok"}'], judge=(PROV, "j"))
+    assert r.status == "pass" and r.checks[-1].name == "judge"
+    assert client.calls[1]["model"] == "j"
+
+
+async def test_judge_error_status_on_malformed_judge():
+    c = case(judge_prompt="good?")
+    r, _ = await ev(c, ["hi", "garbage", "garbage"], judge=(PROV, "j"))
+    assert r.status == "judge_error" and r.error is None
+    assert any("malformed" in w for w in r.warnings)
+
+
+async def test_judge_client_error_is_case_error():
+    c = case(judge_prompt="good?")
+    r, _ = await ev(c, ["hi", ClientError("auth", "no")], judge=(PROV, "j"))
+    assert r.status == "error" and r.error.startswith("auth: ")
+
+
+async def test_concurrency_limit_respected():
+    state = {"cur": 0, "max": 0}
+
+    async def slow(provider, model, messages, params):
+        state["cur"] += 1
+        state["max"] = max(state["max"], state["cur"])
+        await asyncio.sleep(0.02)
+        state["cur"] -= 1
+        return "ok"
+
+    h = Harness(name="h", prompt=PROMPT, cases=[case(f"c{i}") for i in range(6)])
+    client = FakeClient([slow] * 6)
+    await run_harness(
+        h, ModelRef(provider="p", model="m"), {"p": PROV}, client, settings=RunSettings(2)
+    )
+    assert state["max"] == 2
+
+
+async def test_on_result_called_per_case_as_completed():
+    seen = []
+    h = Harness(name="h", prompt=PROMPT, cases=[case("a"), case("b"), case("c")])
+    run = await run_harness(
+        h,
+        ModelRef(provider="p", model="m"),
+        {"p": PROV},
+        FakeClient(["1", "2", "3"]),
+        on_result=seen.append,
+    )
+    assert sorted(r.case_name for r in seen) == ["a", "b", "c"]
+    assert [r.case_name for r in run.results] == ["a", "b", "c"]
+
+
+async def test_results_in_case_order_despite_completion_order():
+    async def by_input(provider, model, messages, params):
+        n = int(messages[-1]["content"].split(":")[1])
+        await asyncio.sleep(0.03 - n * 0.01)
+        return str(n)
+
+    h = Harness(
+        name="h", prompt=PROMPT, cases=[case(f"c{i}", input=str(i)) for i in range(3)]
+    )
+    run = await run_harness(
+        h,
+        ModelRef(provider="p", model="m"),
+        {"p": PROV},
+        FakeClient([by_input] * 3),
+        settings=RunSettings(3),
+    )
+    assert [r.output for r in run.results] == ["0", "1", "2"]
+
+
+async def test_only_case_runs_single_case():
+    h = Harness(name="h", prompt=PROMPT, cases=[case("a"), case("b")])
+    client = FakeClient(["x"])
+    run = await run_harness(
+        h, ModelRef(provider="p", model="m"), {"p": PROV}, client, only_case="b"
+    )
+    assert [r.case_name for r in run.results] == ["b"] and len(client.calls) == 1
+
+
+async def test_results_record_request_tokens_latency():
+    res = ChatResult(
+        text="out",
+        prompt_tokens=3,
+        completion_tokens=4,
+        latency_ms=55,
+        request={"k": 1},
+        response={"r": 2},
+        warnings=["w"],
+    )
+    r, _ = await ev(case(), [res])
+    assert (r.prompt_tokens, r.completion_tokens, r.latency_ms) == (3, 4, 55)
+    assert r.request == {"k": 1} and r.response == {"r": 2} and r.warnings == ["w"]
+
+
+async def test_run_metadata():
+    h = Harness(name="h", prompt=PROMPT, cases=[case("a")])
+    run = await run_harness(
+        h,
+        ModelRef(provider="p", model="m"),
+        {"p": PROV},
+        FakeClient(["x"]),
+        judge_model=ModelRef(provider="p", model="j"),
+    )
+    assert run.harness == "h" and run.prompt_hash == PROMPT.hash
+    assert run.judge_model == ModelRef(provider="p", model="j")
+    assert run.started_at and run.finished_at
+
+
+async def test_run_matrix_returns_run_per_target():
+    h = Harness(name="h", prompt=PROMPT, cases=[case("a")])
+    targets = [ModelRef(provider="p", model="m1"), ModelRef(provider="p", model="m2")]
+    seen = []
+    runs = await run_matrix(
+        h,
+        targets,
+        {"p": PROV},
+        FakeClient(["x", "y"]),
+        None,
+        RunSettings(),
+        lambda t, r: seen.append((str(t), r.case_name)),
+    )
+    assert [str(r.model) for r in runs] == ["p:m1", "p:m2"]
+    assert seen == [("p:m1", "a"), ("p:m2", "a")]
+
+
+@pytest.mark.parametrize("enabled,providers_has,word", [(False, True, "disabled"), (True, False, "unknown")])
+async def test_unavailable_judge_provider_is_judge_error(enabled, providers_has, word):
+    jp = PROV.model_copy(update={"name": "jp", "enabled": enabled})
+    provs = {"p": PROV, **({"jp": jp} if providers_has else {})}
+    h = Harness(
+        name="h",
+        prompt=PROMPT,
+        cases=[
+            case("a", must_include=[Match(pattern="o")], judge_prompt="g"),
+            case("b", judge_prompt="g"),
+            case("c", must_include=[Match(pattern="zzz")], judge_prompt="g"),
+            case("d"),
+        ],
+    )
+    client = FakeClient(["ok"] * 4)
+    run = await run_harness(
+        h,
+        ModelRef(provider="p", model="m"),
+        provs,
+        client,
+        judge_model=ModelRef(provider="jp", model="j"),
+    )
+    assert [r.status for r in run.results] == ["judge_error", "judge_error", "fail", "manual"]
+    assert word in run.results[0].warnings[-1] and "'jp'" in run.results[0].warnings[-1]
+    assert run.results[3].warnings == []
+
+
+async def test_raising_on_result_does_not_lose_results():
+    def boom(r):
+        raise RuntimeError("cb")
+
+    h = Harness(name="h", prompt=PROMPT, cases=[case("a"), case("b")])
+    run = await run_harness(
+        h, ModelRef(provider="p", model="m"), {"p": PROV}, FakeClient(["1", "2"]), on_result=boom
+    )
+    assert [r.output for r in run.results] == ["1", "2"]
+    assert all("on_result failed: RuntimeError: cb" in r.warnings for r in run.results)
+
+
+async def test_unknown_only_case_raises():
+    h = Harness(name="h", prompt=PROMPT, cases=[case("a")])
+    client = FakeClient([])
+    with pytest.raises(ValueError, match="unknown case 'zz'"):
+        await run_harness(h, ModelRef(provider="p", model="m"), {"p": PROV}, client, only_case="zz")
+    assert client.calls == []

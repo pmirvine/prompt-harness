@@ -1,0 +1,44 @@
+format_version: 1
+name: summarize-example
+description: Two tiny cases - a one-sentence summary and a structured JSON extraction.
+prompt:
+  system: You are a precise assistant. Follow the requested output format exactly.
+  template: |-
+    {{ input }}
+  temperature: 0.0
+  max_tokens: 300
+cases:
+  - name: one-sentence-summary
+    input: |-
+      Summarize the following in one sentence.
+
+      The city council voted on Tuesday to extend the library's opening hours
+      to 9 p.m. on weekdays, starting in January. The change is funded by a
+      small grant and will be reviewed after six months.
+    notes: Must mention the library; the model should not run past one sentence.
+    expectation:
+      must_include:
+        - pattern: library
+      must_not_include:
+        - pattern: "As an AI"
+  - name: json-extraction
+    input: |-
+      Extract the fields below from the text and reply with only a JSON object
+      with the keys "city" (string) and "year" (integer).
+
+      Paris hosted the Summer Olympics in 2024.
+    notes: Output must be valid JSON matching the schema.
+    expectation:
+      json_output: true
+      json_schema:
+        type: object
+        required: [city, year]
+        properties:
+          city:
+            type: string
+          year:
+            type: integer
+accepted_model: openai:gpt-4o-mini
+accepted_outputs:
+  one-sentence-summary: The city council voted to extend the library's weekday hours to 9 p.m. from January, with a review after six months.
+  json-extraction: '{"city": "Paris", "year": 2024}'
