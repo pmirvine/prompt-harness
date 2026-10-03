@@ -41,10 +41,24 @@ promptharness            # or: uv run promptharness
 
 ## Quickstart
 
-The repo ships a starter harness, [`examples/quickstart.harness.yaml`](examples/quickstart.harness.yaml): three tiny deterministic cases (a fact, a JSON extraction, a formatting rule) that any chat model should pass. It has no accepted model, so you choose what to try. With a local server such as LM Studio, Ollama or vLLM running:
+### The starter test case
+
+The repo ships a starter harness, [`examples/quickstart.harness.yaml`](examples/quickstart.harness.yaml). It is a model-agnostic smoke test of three tiny deterministic cases that any chat model should pass. It has no accepted model, so you choose what to try.
+
+| Case | Prompt (abridged) | What it checks |
+|------|-------------------|----------------|
+| `capital-of-france` | "What is the capital of France? Answer with just the city name." | Output must include `Paris` and must not include `London` |
+| `extract-person-json` | Extract `name` and `age` from "Ada Lovelace was 36 years old when she died." | Output must be valid JSON matching a schema (`name` string, `age` integer) |
+| `three-colors` | "List exactly three different colors, lowercase, separated by commas." | Output must match a regex for `a, b, c` |
+
+The shared prompt uses `temperature: 0.0` and `max_tokens: 2048`. The generous limit is deliberate, see the note on reasoning models below.
+
+### Try it yourself
+
+With a local server such as LM Studio, Ollama or vLLM running (LM Studio's server is on port 1234 by default):
 
 ```sh
-# 1. Register the server (no API key needed locally); LM Studio's default port is 1234
+# 1. Register the server (no API key needed locally)
 promptharness provider add lmstudio --base-url http://localhost:1234/v1
 
 # 2. Load the starter harness
@@ -54,7 +68,17 @@ promptharness import examples/quickstart.harness.yaml
 promptharness run quickstart --model lmstudio:your-model-id
 ```
 
-You should see three `pass` rows and exit code 0. A failure prints the reason underneath the table. Add `--judge lmstudio:your-model-id` to also exercise the LLM judge once you add a `judge_prompt` to a case.
+Replace `your-model-id` with an id from `curl http://localhost:1234/v1/models`, and change the base URL if the server runs on another machine. You should see:
+
+```
+case                 lmstudio:your-model-id
+capital-of-france    pass
+extract-person-json  pass
+three-colors         pass
+3 pass, 0 fail, 0 error, 0 judge_error, 0 manual
+```
+
+and exit code 0. A failure prints the reason underneath the table. To also exercise the LLM judge, add a `judge_prompt` to a case in the harness and pass `--judge lmstudio:your-model-id`.
 
 In the TUI the same steps are: `4` then `a` to add the provider, `t` to fetch its models, `1` then `i` to import `examples/quickstart.harness.yaml`, and `m` to run it against one or more models.
 
