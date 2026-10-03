@@ -137,6 +137,7 @@ async def test_harnesses_table_lists_harnesses(tmp_path):
         assert t.row_count == 2
         assert [str(c) for c in t.get_row("h")] == ["h", "p:m1", "2"]
         assert app.focused is t
+    assert app.client.calls == []
 
 
 async def test_enter_opens_harness_in_studio(tmp_path):
@@ -156,6 +157,7 @@ async def test_enter_opens_harness_in_studio(tmp_path):
         assert app.query_one("#model", Select).value == "p:m2"
         assert app.focused is app.query_one("#cases", ListView)
         assert studio._saved_as == ("h", "demo")
+    assert app.client.calls == []
 
 
 async def test_studio_load_harness_with_unlisted_model_and_clears_results(tmp_path):
@@ -222,6 +224,7 @@ async def test_open_harness_over_dirty_studio_accept_loads(tmp_path):
         assert [c.name for c in studio.cases] == ["c1", "c2"]
         assert studio.current_prompt().template == "Q: {{ input }}"
         assert not studio.is_dirty()
+    assert app.client.calls == []
 
 
 async def test_open_harness_over_clean_studio_loads_without_prompt(tmp_path):
@@ -240,6 +243,7 @@ async def test_open_harness_over_clean_studio_loads_without_prompt(tmp_path):
             assert not isinstance(app.screen, ConfirmModal)
             assert app.query_one(TabbedContent).active == "studio"
             assert studio._saved_as[0] == name
+    assert app.client.calls == []
 
 
 async def test_studio_results_make_it_dirty(tmp_path):
@@ -274,6 +278,7 @@ async def test_duplicate_harness_creates_copy_named_with_suffix(tmp_path):
         assert [c.name for c in copy.cases] == ["c1", "c2"]
         assert copy.prompt == make_harness().prompt
         assert t.row_count == 3
+    assert app.client.calls == []
 
 
 async def test_delete_harness_asks_for_confirmation(tmp_path):
@@ -293,6 +298,7 @@ async def test_delete_harness_asks_for_confirmation(tmp_path):
         await pilot.pause()
         assert db.get_harness("h") is None
         assert t.row_count == 0
+    assert app.client.calls == []
 
 
 async def test_export_writes_file_and_shows_errors_inline(tmp_path):
@@ -320,6 +326,7 @@ async def test_export_writes_file_and_shows_errors_inline(tmp_path):
         assert out.read_text().lstrip().startswith("{")
         assert '"name": "h"' in out.read_text()
         assert not app.screen.query("#export-path")  # modal closed
+    assert app.client.calls == []
 
 
 async def test_import_via_tui_reports_portable_error(tmp_path):
@@ -341,6 +348,7 @@ async def test_import_via_tui_reports_portable_error(tmp_path):
         assert "cannot read" in str(app.screen.query_one("#import-error").content).lower()
         assert [x.name for x in db.list_harnesses()] == ["h"]
         assert app.is_running
+    assert app.client.calls == []
 
 
 async def test_import_new_and_existing_name_with_overwrite_confirm(tmp_path):
@@ -377,6 +385,7 @@ async def test_import_new_and_existing_name_with_overwrite_confirm(tmp_path):
         await pilot.pause()
         assert db.get_harness("fresh") is not None
         assert t.row_count == 2
+    assert app.client.calls == []
 
 
 async def test_typing_in_modal_inputs_does_not_trigger_pane_or_app_keys(tmp_path):
@@ -399,6 +408,7 @@ async def test_typing_in_modal_inputs_does_not_trigger_pane_or_app_keys(tmp_path
             assert [x.name for x in db.list_harnesses()] == ["h"]
             await pilot.press("escape")
             await until(pilot, lambda: not app.screen.query(field))
+    assert app.client.calls == []
 
 
 # ---------------------------------------------------------------- matrix
@@ -456,6 +466,7 @@ async def test_regression_disabled_provider_not_offered(tmp_path):
         sl = app.screen.query_one("#regression-models", SelectionList)
         values = [sl.get_option_at_index(i).value for i in range(sl.option_count)]
         assert values == ["p:m1", "p:m2"]
+    assert app.client.calls == []
 
 
 async def test_judge_same_as_tested_model_warns(tmp_path):
@@ -714,3 +725,4 @@ async def test_fast_tab_switch_from_harnesses_does_not_bounce(tmp_path):
         await pilot.pause()
         await pilot.pause()
         assert app.query_one(TabbedContent).active == "studio"
+    assert app.client.calls == []

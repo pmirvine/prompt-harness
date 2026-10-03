@@ -59,6 +59,7 @@ async def test_compare_screen_shows_accepted_first_then_models(tmp_path):
         panes = screen.panes
         assert panes[0].size.width == panes[1].size.width  # equal-width
         assert app.focused is panes[0]
+    assert app.client.calls == []
 
 
 async def test_compare_handles_missing_result_column(tmp_path):
@@ -69,6 +70,7 @@ async def test_compare_handles_missing_result_column(tmp_path):
         await pilot.pause()
         assert "no result" in app.screen.pane_texts[1]
         assert "hello" in app.screen.pane_texts[0]
+    assert app.client.calls == []
 
 
 async def test_compare_left_right_move_focus_and_escape_goes_back(tmp_path):
@@ -89,6 +91,7 @@ async def test_compare_left_right_move_focus_and_escape_goes_back(tmp_path):
         await pilot.pause()
         assert app.screen is base
         assert app.query_one(TabbedContent).active == "harnesses"
+    assert app.client.calls == []
 
 
 # ---------------------------------------------------------------- matrix -> compare
@@ -184,6 +187,7 @@ async def test_read_only_matrix_compare_columns_come_from_runs(tmp_path):
         assert [lbl for lbl, _ in cols] == ["accepted: p:m1", f"p:m2 #{r2.id}"]
         assert cols[1][1].output == "second one"
         assert matrix.compare_columns("c2")[1][1] is None
+    assert app.client.calls == []
 
 
 # ---------------------------------------------------------------- read-only verdicts
@@ -213,6 +217,7 @@ async def test_verdict_on_stored_run_persists_and_updates_cell(tmp_path):
         await pilot.press("escape")
         await pilot.pause()
         assert cell(matrix, "c1", key) == "fail"
+    assert app.client.calls == []
 
 
 async def test_read_only_verdict_without_result_id_shows_message(tmp_path):
@@ -229,6 +234,7 @@ async def test_read_only_verdict_without_result_id_shows_message(tmp_path):
         await pilot.pause()
         assert isinstance(app.screen, ResultDetail)
         assert notified(app, "Read-only")
+    assert app.client.calls == []
 
 
 # ---------------------------------------------------------------- re-test
@@ -318,6 +324,7 @@ async def test_retest_manual_entry_unknown_provider_shows_case_errors(tmp_path):
         assert cell(matrix, "c1", key) == "error"
         assert "ghost" in matrix.results[("c1", key)].error
         assert app.is_running
+    assert app.client.calls == []
 
 
 async def test_retest_notifies_when_harness_prompt_changed(tmp_path):
@@ -352,6 +359,7 @@ async def test_retest_deleted_harness_shows_error_and_survives(tmp_path):
         assert not isinstance(app.screen, MatrixScreen)
         assert notified(app, "no longer exists")
         assert t.row_count == 1
+    assert app.client.calls == []
 
 
 async def test_retest_without_run_selected_warns(tmp_path):
@@ -363,6 +371,7 @@ async def test_retest_without_run_selected_warns(tmp_path):
         await pilot.pause()
         assert not isinstance(app.screen, RetestForm)
         assert notified(app, "No run selected")
+    assert app.client.calls == []
 
 
 async def test_typing_in_retest_input_does_not_trigger_keys(tmp_path):
@@ -383,3 +392,4 @@ async def test_typing_in_retest_input_does_not_trigger_keys(tmp_path):
         await pilot.press("escape")
         await until(pilot, lambda: not isinstance(app.screen, RetestForm))
         assert len(db.list_runs()) == 1
+    assert app.client.calls == []

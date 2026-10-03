@@ -194,37 +194,52 @@ def import_(
 @provider_app.command("add")
 def provider_add(
     name: str = typer.Argument(...),
-    base_url: str = typer.Option(..., "--base-url"),
-    api_key_env: str = typer.Option(
-        "",
+    base_url: Optional[str] = typer.Option(
+        None, "--base-url", help="Required when adding a new provider"
+    ),
+    api_key_env: Optional[str] = typer.Option(
+        None,
         "--api-key-env",
         help="Name of env var holding the key (omit for local servers that need none)",
     ),
-    max_tokens_param: str = typer.Option(
-        "max_tokens",
+    max_tokens_param: Optional[str] = typer.Option(
+        None,
         "--max-tokens-param",
-        help="Request field for the token limit: max_tokens or max_completion_tokens",
+        help="Request field for the token limit: max_tokens (default) or max_completion_tokens",
     ),
 ) -> None:
-    """Add or update a provider (the key itself is never stored)."""
-    if max_tokens_param not in _MAX_TOKENS_PARAMS:
+    """Add a provider, or update an existing one (only the options given change).
+
+    The key itself is never stored, only the name of the env var that holds it.
+    """
+    if max_tokens_param is not None and max_tokens_param not in _MAX_TOKENS_PARAMS:
         raise _usage_error(
             f"invalid --max-tokens-param {max_tokens_param!r} "
             f"(expected {' or '.join(_MAX_TOKENS_PARAMS)})"
         )
+    given = {
+        k: v
+        for k, v in {
+            "base_url": base_url,
+            "api_key_env": api_key_env,
+            "max_tokens_param": max_tokens_param,
+        }.items()
+        if v is not None
+    }
     db = Database(paths.db_path())
     try:
-        db.save_provider(
-            Provider(
-                name=name,
-                base_url=base_url,
-                api_key_env=api_key_env,
-                max_tokens_param=max_tokens_param,  # type: ignore[arg-type]
-            )
-        )
+        existing = db.get_provider(name)
+        if existing is not None:
+            db.save_provider(existing.model_copy(update=given))
+            verb = "Updated"
+        else:
+            if base_url is None:
+                raise _usage_error("--base-url is required when adding a new provider")
+            db.save_provider(Provider(name=name, **{"api_key_env": "", **given}))
+            verb = "Added"
     finally:
         db.close()
-    typer.echo(f"Saved provider {name}")
+    typer.echo(f"{verb} provider {name}")
 
 
 @provider_app.command("list")

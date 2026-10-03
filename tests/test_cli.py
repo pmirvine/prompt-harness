@@ -58,24 +58,27 @@ def test_run_manual_only_exit_zero(setup):
 
 
 def test_run_unknown_harness_exit_two_with_message(setup):
-    setup([])
+    fake = setup([])
     r = runner.invoke(cli.app, ["run", "nope", "--model", "p:m"])
     assert r.exit_code == 2
     assert "nope" in r.output
+    assert fake.calls == []
 
 
 def test_run_bad_model_spec_exit_two(setup):
-    setup([])
+    fake = setup([])
     r = runner.invoke(cli.app, ["run", "h", "--model", "badspec"])
     assert r.exit_code == 2
     assert "badspec" in r.output
+    assert fake.calls == []
 
 
 def test_run_unknown_case_exit_two(setup):
-    setup([])
+    fake = setup([])
     r = runner.invoke(cli.app, ["run", "h", "--model", "p:m", "--case", "zzz"])
     assert r.exit_code == 2
     assert "zzz" in r.output
+    assert fake.calls == []
 
 
 def test_run_persists_runs(setup):
@@ -87,7 +90,7 @@ def test_run_persists_runs(setup):
 
 
 def test_export_then_import_roundtrip(setup, tmp_path):
-    setup([])
+    fake = setup([])
     out = tmp_path / "h.yaml"
     r = runner.invoke(cli.app, ["export", "h", "--out", str(out)])
     assert r.exit_code == 0, r.output
@@ -98,16 +101,18 @@ def test_export_then_import_roundtrip(setup, tmp_path):
     r = runner.invoke(cli.app, ["import", str(out)])
     assert r.exit_code == 0, r.output
     assert _db().get_harness("h") is not None
+    assert fake.calls == []
 
 
 def test_import_existing_without_overwrite_exit_one(setup, tmp_path):
-    setup([])
+    fake = setup([])
     out = tmp_path / "h.json"
     assert runner.invoke(cli.app, ["export", "h", "--format", "json", "--out", str(out)]).exit_code == 0
     r = runner.invoke(cli.app, ["import", str(out)])
     assert r.exit_code == 1
     r = runner.invoke(cli.app, ["import", str(out), "--overwrite"])
     assert r.exit_code == 0, r.output
+    assert fake.calls == []
 
 
 def test_provider_add_and_list():
@@ -134,12 +139,13 @@ def _two_case_harness():
 def test_run_missing_env_var_reason_shown(setup, monkeypatch):
     from promptharness.core.client import OpenAIChatClient
 
-    setup([])
+    fake = setup([])
     monkeypatch.delenv("K", raising=False)
     monkeypatch.setattr(cli, "client_factory", OpenAIChatClient)
     r = runner.invoke(cli.app, ["run", "h", "--model", "p:m"])
     assert r.exit_code == 1
     assert "c1 × p:m: error — config: environment variable K is not set" in r.output
+    assert fake.calls == []
 
 
 def test_run_failed_check_reason_shown(setup):
@@ -243,3 +249,43 @@ def test_provider_add_without_api_key_env():
     )
     assert r.exit_code == 0, r.output
     assert _db().get_provider("local").api_key_env == ""
+
+
+def test_provider_add_existing_merges_and_says_updated():
+    db = _db()
+    db.save_provider(Provider(name="acme", base_url="http://a/v1", api_key_env="K1",
+                              enabled=False, headers={"x": "y"}, timeout=5.0, max_retries=0,
+                              max_tokens_param="max_completion_tokens"))
+    db.close()
+    r = runner.invoke(cli.app, ["provider", "add", "acme", "--base-url", "http://b/v1"])
+    assert r.exit_code == 0, r.output
+    assert "Updated provider acme" in r.output
+    got = _db().get_provider("acme")
+    assert got.base_url == "http://b/v1"
+    assert got.api_key_env == "K1"
+    assert got.enabled is False and got.headers == {"x": "y"}
+    assert got.timeout == 5.0 and got.max_retries == 0
+    assert got.max_tokens_param == "max_completion_tokens"
+    r = runner.invoke(cli.app, ["provider", "add", "acme", "--api-key-env", "K2",
+                                "--max-tokens-param", "max_tokens"])
+    assert r.exit_code == 0, r.output
+    got = _db().get_provider("acme")
+    assert (got.base_url, got.api_key_env, got.max_tokens_param) == (
+        "http://b/v1", "K2", "max_tokens")
+
+
+def test_provider_add_new_says_added_and_needs_base_url():
+    r = runner.invoke(cli.app, ["provider", "add", "acme", "--base-url", "http://a/v1"])
+    assert r.exit_code == 0, r.output
+    assert "Added provider acme" in r.output
+    r = runner.invoke(cli.app, ["provider", "add", "other"])
+    assert r.exit_code == 2
+    assert "--base-url" in r.output
+    assert _db().get_provider("other") is None
+
+
+def test_export_bad_format_is_usage_error(setup):
+    fake = setup([])
+    r = runner.invoke(cli.app, ["export", "h", "--format", "bad"])
+    assert r.exit_code == 2
+    assert fake.calls == []

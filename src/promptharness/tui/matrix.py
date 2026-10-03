@@ -13,9 +13,9 @@ from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Header, Label, Static
 
 from promptharness.core.models import CaseResult, Harness, ModelRef, Run
-from promptharness.tui.compare import CompareScreen
 from promptharness.core.runner import run_harness
 from promptharness.core.status import final_status
+from promptharness.tui.compare import CompareScreen
 from promptharness.tui.studio_modals import VerdictModal
 from promptharness.tui.studio_support import STATUS_STYLE, format_result, now_iso
 

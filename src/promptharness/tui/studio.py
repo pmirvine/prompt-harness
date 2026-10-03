@@ -7,6 +7,7 @@ from textual import events, on
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.css.query import NoMatches
 from textual.timer import Timer
 from textual.widget import Widget
 from textual.widgets import (
@@ -305,8 +306,11 @@ class StudioPane(StudioPersistMixin, Widget):
 
     def _set_running(self, delta: int) -> None:
         self._active_runs = max(0, self._active_runs + delta)
-        self.query_one("#studio-status", Label).update(
-            "● running…" if self._active_runs else "idle")
+        try:
+            status = self.query_one("#studio-status", Label)
+        except NoMatches:  # pane torn down (app quitting during a run)
+            return
+        status.update("● running…" if self._active_runs else "idle")
 
     async def action_run_selected(self) -> None:
         if self._busy():

@@ -69,7 +69,7 @@ promptharness provider add ollama     --base-url http://localhost:11434/v1
 promptharness provider list
 ```
 
-`provider add` on an existing name updates it. Models are referred to everywhere as `provider:model`, for example `openai:gpt-4o-mini` or `ollama:llama3.2`.
+`provider add` on an existing name updates only the options you pass and keeps the rest (including whether it is enabled); it prints `Added` or `Updated`. `--max-tokens-param max_completion_tokens` (also a choice in the TUI form) sends the token limit as `max_completion_tokens`, which some newer OpenAI models require. If a provider rejects a parameter (for example `temperature`), the request is retried without it and the result carries a `dropped param: ...` warning. Models are referred to everywhere as `provider:model`, for example `openai:gpt-4o-mini` or `ollama:llama3.2`.
 
 ## Key bindings
 
@@ -147,11 +147,11 @@ promptharness run NAME --model openai:gpt-4o-mini [--model groq:llama-3.3-70b-ve
     [--judge openai:gpt-4o] [--concurrency 2] [--case CASE_NAME]
 promptharness export NAME [--format yaml|json] [--inline-documents] [--out FILE]
 promptharness import FILE [--overwrite]
-promptharness provider add NAME --base-url URL [--api-key-env VAR]
+promptharness provider add NAME --base-url URL [--api-key-env VAR] [--max-tokens-param max_tokens|max_completion_tokens]
 promptharness provider list
 ```
 
-`run` executes a saved harness against each `--model` (repeatable), saves every run to the database (so it shows on the Runs tab), and prints a case x model table of statuses. `--concurrency` (default 2) bounds parallel requests per model, `--case` runs a single case, `--judge` supplies the judge model.
+`run` executes a saved harness against each `--model` (repeatable), saves every run to the database (so it shows on the Runs tab), and prints a case x model table of statuses, then one line per non-passing cell with the reason (`c1 × openai:gpt-4o-mini: fail — include:ok: pattern not found: 'ok'`), one line per warning, and a summary (`3 pass, 1 fail, 0 error, 0 judge_error, 0 manual`). `--concurrency` (default 2) bounds parallel requests per model, `--case` runs a single case, `--judge` supplies the judge model.
 
 Exit codes for `run`:
 
@@ -161,7 +161,7 @@ Exit codes for `run`:
 | `1` | At least one case ended in `fail`, `error` or `judge_error` |
 | `2` | Usage error: bad `provider:model`, unknown harness, unknown `--case` |
 
-`export` and `import` exit `1` on errors (missing harness, unreadable or invalid file, name already exists without `--overwrite`). Typer's own argument errors also exit `2`.
+`export` and `import` exit `1` on errors (missing harness, unreadable or invalid file, name already exists without `--overwrite`). Usage errors exit `2`: `export --format` other than `yaml`/`json`, and Typer's own argument errors.
 
 ## Export and import
 
@@ -172,7 +172,7 @@ Exit codes for `run`:
 - `accepted_model` (`provider:model`) and `accepted_outputs` (case name to the accepted run's output), when the harness has an accepted run
 - with `--inline-documents` (or the checkbox in the TUI export dialog): each case's `document_texts`, the full text of its documents
 
-Provider settings, env var names, keys, run history and verdicts are **not** exported. On import, inline documents that do not exist at their original path are written under `<data dir>/documents/<harness name>/` and the case is repointed there. If the file has `accepted_outputs`, they become an accepted run for `accepted_model`; those restored outputs carry no check results, so their status is `manual`. Importing a name that exists fails unless you pass `--overwrite` (or confirm in the TUI).
+Provider settings, env var names, keys, run history and verdicts are **not** exported. On import, inline documents that do not exist at their original path are written under `<data dir>/documents/<harness name>/` and the case is repointed there. If the file has `accepted_outputs`, they become an accepted run for `accepted_model`; those restored outputs carry no check results, so their status is `manual`. Importing a name that exists fails unless you pass `--overwrite` (or confirm in the TUI). An imported harness may reference local document paths; when it runs, those files' contents are sent to the provider you run it against, so review a harness from someone else (its cases' document paths) before running it.
 
 A ready-to-use example with two tiny cases is in [`examples/summarize.harness.yaml`](examples/summarize.harness.yaml):
 

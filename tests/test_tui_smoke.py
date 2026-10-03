@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 
 from conftest import FakeClient
 from textual.widgets import (
@@ -38,6 +39,7 @@ async def test_app_starts_and_tabs_switch(tmp_path):
         assert tabs.active == "providers"
         await pilot.press("1")
         assert tabs.active == "harnesses"
+    assert app.client.calls == []
 
 
 async def test_q_quits(tmp_path):
@@ -46,6 +48,7 @@ async def test_q_quits(tmp_path):
         await pilot.press("q")
         await pilot.pause()
     assert not app.is_running
+    assert app.client.calls == []
 
 
 async def test_add_provider_via_form(tmp_path):
@@ -65,6 +68,7 @@ async def test_add_provider_via_form(tmp_path):
         assert got.base_url == "https://x.test/v1"
         assert got.api_key_env == "ACME_KEY"
         assert app.query_one("#providers-table", DataTable).row_count == 1
+    assert app.client.calls == []
 
 
 async def test_form_rejects_empty_fields(tmp_path):
@@ -77,6 +81,7 @@ async def test_form_rejects_empty_fields(tmp_path):
         await pilot.pause()
         assert db.list_providers() == []
         assert app.screen.query("#submit")  # form still open
+    assert app.client.calls == []
 
 
 async def test_toggle_enabled(tmp_path):
@@ -89,6 +94,7 @@ async def test_toggle_enabled(tmp_path):
         await pilot.press("d")
         await pilot.pause()
         assert db.get_provider("p").enabled is False
+    assert app.client.calls == []
 
 
 async def test_connection_success_saves_models(tmp_path):
@@ -148,6 +154,7 @@ async def test_manual_model_entry(tmp_path):
         await pilot.click("#submit")
         await pilot.pause()
         assert db.list_models("p") == ["gpt-a", "gpt-b"]
+    assert app.client.calls == []
 
 
 async def _fill(app, name, url, env):
@@ -170,6 +177,7 @@ async def test_add_duplicate_name_is_rejected(tmp_path):
         assert any("exists" in n.message for n in app._notifications)
         got = db.get_provider("acme")
         assert (got.base_url, got.api_key_env, got.enabled) == ("https://a.test", "K1", False)
+    assert app.client.calls == []
 
 
 async def test_invalid_base_url_is_rejected(tmp_path):
@@ -185,6 +193,7 @@ async def test_invalid_base_url_is_rejected(tmp_path):
             assert app.screen.query("#submit"), bad
             assert db.list_providers() == [], bad
         assert any("URL" in n.message for n in app._notifications)
+    assert app.client.calls == []
 
 
 async def test_edit_prefills_and_preserves_fields(tmp_path):
@@ -206,6 +215,7 @@ async def test_edit_prefills_and_preserves_fields(tmp_path):
         assert got.base_url == "https://b.test"
         assert got.enabled is False and got.timeout == 5.0 and got.headers == {"x": "y"}
         assert len(db.list_providers()) == 1
+    assert app.client.calls == []
 
 
 async def test_add_provider_with_empty_env_var(tmp_path):
@@ -253,6 +263,7 @@ async def test_edit_prefills_max_tokens_param(tmp_path):
         await pilot.click("#submit")
         await pilot.pause()
         assert db.get_provider("acme").max_tokens_param == "max_tokens"
+    assert app.client.calls == []
 
 
 async def test_cancel_leaves_db_unchanged(tmp_path):
@@ -266,6 +277,7 @@ async def test_cancel_leaves_db_unchanged(tmp_path):
         await pilot.pause()
         assert not app.screen.query("#submit")
         assert db.list_providers() == []
+    assert app.client.calls == []
 
 
 async def test_typing_in_input_does_not_trigger_app_keys(tmp_path):
@@ -279,6 +291,7 @@ async def test_typing_in_input_does_not_trigger_app_keys(tmp_path):
         assert app.is_running
         assert app.query_one(TabbedContent).active == "providers"
         assert app.screen.query_one("#name", Input).value == "q23"
+    assert app.client.calls == []
 
 
 async def test_landing_on_providers_focuses_table(tmp_path):
@@ -290,6 +303,7 @@ async def test_landing_on_providers_focuses_table(tmp_path):
         await pilot.press("1", "4")
         await pilot.pause()
         assert app.focused is app.query_one("#providers-table")
+    assert app.client.calls == []
 
 
 # ---------------------------------------------------------------- studio
@@ -366,6 +380,7 @@ async def test_studio_model_options_from_enabled_providers(tmp_path):
         await pilot.press("enter")
         await pilot.pause()
         assert any("provider:model" in n.message for n in app._notifications)
+    assert app.client.calls == []
 
 
 async def test_studio_run_one_case_shows_output(tmp_path):
@@ -444,6 +459,7 @@ async def test_studio_template_and_provider_errors_shown(tmp_path):
         await settle(app, pilot)
         assert "disabled" in pane.output_text
         assert app.is_running
+    assert app.client.calls == []
 
 
 async def test_studio_run_without_model_or_cases_is_reported(tmp_path):
@@ -463,6 +479,7 @@ async def test_studio_run_without_model_or_cases_is_reported(tmp_path):
         await settle(app, pilot)
         assert any("max tokens" in n.message.lower() for n in app._notifications)
         assert app.is_running
+    assert app.client.calls == []
 
 
 async def test_studio_case_new_edit_delete_via_keys(tmp_path):
@@ -488,7 +505,8 @@ async def test_studio_case_new_edit_delete_via_keys(tmp_path):
         await pilot.pause()
         assert [c.name for c in pane.cases] == ["first"]
         c = pane.cases[0]
-        assert c.input == "the input" and c.documents == ["a.txt", "b.txt"]
+        assert c.input == "the input"
+        assert c.documents == [os.path.abspath("a.txt"), os.path.abspath("b.txt")]
         e = c.expectation
         assert [(m.pattern, m.regex) for m in e.must_include] == [("foo", True), ("ba+r", True)]
         assert [m.pattern for m in e.must_not_include] == ["bad"]
@@ -513,7 +531,8 @@ async def test_studio_case_new_edit_delete_via_keys(tmp_path):
         await pilot.press("enter")
         await pilot.pause()
         assert app.screen.query_one("#case-name", Input).value == "first"
-        assert app.screen.query_one("#case-docs", Input).value == "a.txt, b.txt"
+        assert app.screen.query_one("#case-docs", Input).value == (
+            f"{os.path.abspath('a.txt')}, {os.path.abspath('b.txt')}")
         assert app.screen.query_one("#match-mode", Select).value == "normalized"
         app.screen.query_one("#case-name", Input).value = "renamed"
         app.screen.query_one("#case-submit").press()
@@ -526,6 +545,7 @@ async def test_studio_case_new_edit_delete_via_keys(tmp_path):
         await pilot.pause()
         assert pane.cases == []
         assert len(lv.children) == 0
+    assert app.client.calls == []
 
 
 async def test_studio_typing_in_editors_does_not_trigger_actions(tmp_path):
@@ -605,6 +625,7 @@ async def test_studio_edit_pause_snapshots_history(tmp_path):
         await pilot.press("ctrl+z")
         await pilot.pause()
         assert ta.text == after_a
+    assert app.client.calls == []
 
 
 async def test_judge_same_as_model_warns(tmp_path):
@@ -617,6 +638,7 @@ async def test_judge_same_as_model_warns(tmp_path):
         await pilot.pause()
         assert any("judge" in n.message.lower() and n.severity == "warning"
                    for n in app._notifications)
+    assert app.client.calls == []
 
 
 async def _run_and_save(app, pilot, pane, name):
@@ -749,6 +771,7 @@ async def test_manual_verdict_without_result_warns(tmp_path):
         await pilot.press("v")
         await pilot.pause()
         assert any("no result" in n.message.lower() for n in app._notifications)
+    assert app.client.calls == []
 
 
 async def test_leaving_studio_with_editor_focused_does_not_bounce_back(tmp_path):
@@ -765,6 +788,7 @@ async def test_leaving_studio_with_editor_focused_does_not_bounce_back(tmp_path)
             await pilot.pause()
             await pilot.pause()
             assert tabs.active == "runs", wid
+    assert app.client.calls == []
 
 
 def gated(gate: asyncio.Event, text: str):
@@ -874,6 +898,7 @@ async def test_reentering_studio_does_not_repeat_judge_warning(tmp_path):
         assert toasts(app, "Judge model is the same") == n
         assert app.query_one("#judge", Select).value == "p:m1"
         assert app.query_one("#model", Select).value == "p:m1"
+    assert app.client.calls == []
 
 
 async def test_second_run_and_save_rejected_while_running(tmp_path):
@@ -973,3 +998,36 @@ async def test_save_lookup_error_is_reported_not_crash(tmp_path):
         await pilot.pause()
         assert app.is_running
         assert toasts(app, "db locked") == 1
+    assert app.client.calls == []
+
+
+async def test_studio_set_running_survives_teardown(tmp_path):
+    app = PromptHarnessApp(db=make_db(tmp_path), client=FakeClient([]))
+    async with app.run_test() as pilot:
+        studio = app.query_one(StudioPane)
+        studio._set_running(+1)
+        await studio.query_one("#studio-status").remove()
+        await pilot.pause()
+        studio._set_running(-1)  # app quitting mid-run: status label already gone
+        assert studio._active_runs == 0
+    assert app.client.calls == []
+
+
+async def test_case_form_normalises_document_paths(tmp_path):
+    app = PromptHarnessApp(db=studio_db(tmp_path), client=FakeClient([]))
+    async with app.run_test() as pilot:
+        pane = await open_studio(app, pilot)
+        app.query_one("#cases", ListView).focus()
+        await pilot.press("n")
+        await pilot.pause()
+        s = app.screen
+        s.query_one("#case-name", Input).value = "docs"
+        s.query_one("#case-docs", Input).value = f"~/notes.txt, rel/../x.txt, {tmp_path}/a.txt"
+        s.query_one("#case-submit").press()
+        await pilot.pause()
+        assert pane.cases[0].documents == [
+            os.path.join(os.path.expanduser("~"), "notes.txt"),
+            os.path.abspath("x.txt"),
+            str(tmp_path / "a.txt"),
+        ]
+    assert app.client.calls == []

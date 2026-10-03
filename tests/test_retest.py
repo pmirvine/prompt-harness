@@ -101,19 +101,22 @@ async def test_retest_same_model_raises_before_running(db):
 
 async def test_retest_missing_harness_raises_clear_error(db):
     run = make_run(make_harness("gone"))
+    client = FakeClient([])
     with pytest.raises(ValueError, match="gone"):
-        await retest(db, run, NEW, {}, FakeClient([]), RunSettings())
+        await retest(db, run, NEW, {}, client, RunSettings())
     assert db.list_runs() == []
+    assert client.calls == []
 
 
 async def test_retest_unknown_provider_gives_per_case_errors(db):
     h = make_harness()
     db.save_harness(h)
-    new = await retest(db, make_run(h), ModelRef.parse("nope:x"), {}, FakeClient([]),
-                       RunSettings())
+    client = FakeClient([])
+    new = await retest(db, make_run(h), ModelRef.parse("nope:x"), {}, client, RunSettings())
     assert [r.status for r in new.results] == ["error", "error"]
     assert "nope" in new.results[0].error
     assert len(db.list_runs()) == 1
+    assert client.calls == []
 
 
 def test_prompt_changed(db):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 
 from textual import on
@@ -105,7 +106,9 @@ class CaseForm(ModalScreen["Case | None"]):
             json_schema=schema,
             judge_prompt=judge or None,
         )
-        docs = [d.strip() for d in q("#case-docs", Input).value.split(",") if d.strip()]
+        # Normalise on entry so documents resolve the same regardless of the cwd at run time.
+        docs = [os.path.abspath(os.path.expanduser(d.strip()))
+                for d in q("#case-docs", Input).value.split(",") if d.strip()]
         self.dismiss(Case(
             name=name,
             input=q("#case-input", TextArea).text,
