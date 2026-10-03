@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "promptharness"
+version = "0.1.0"
+description = "Prompt regression testing TUI"
+requires-python = ">=3.11"
+dependencies = [
+    "textual",
+    "openai",
+    "jinja2",
+    "pydantic",
+    "typer",
+    "pyyaml",
+    "jsonschema",
+    "platformdirs",
+]
+
+[project.scripts]
+promptharness = "promptharness.cli:app"
+
+[dependency-groups]
+dev = ["pytest", "pytest-asyncio"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/promptharness"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
