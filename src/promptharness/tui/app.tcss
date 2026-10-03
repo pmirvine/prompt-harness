@@ -14,3 +14,21 @@ ProviderForm, ModelsForm { align: center middle; }
 #form TextArea { height: 8; }
 #buttons { height: auto; margin-top: 1; }
 #buttons Button { margin-right: 2; }
+StudioPane { height: 1fr; }
+#studio-top { height: 3; }
+#studio-top Select { width: 1fr; }
+#manual-model { width: 26; }
+#temperature, #max_tokens { width: 14; }
+#studio-body { height: 1fr; }
+#studio-editors { width: 1fr; }
+#studio-editors Label, #studio-side Label { color: #8a93a3; }
+#system { height: 1fr; }
+#template { height: 2fr; }
+#studio-side { width: 1fr; }
+#cases { height: 10; border: round #4a5568; background: #101216; }
+#cases:focus { border: round #7fd1b9; }
+#output { height: 1fr; border: round #4a5568; background: #0c0e12; }
+CaseForm, SaveForm, ConfirmModal, VerdictModal { align: center middle; }
+#case-form { width: 72; height: 90%; padding: 1 2; border: round #4a5568; background: #181b22; }
+#case-form Label { margin-top: 1; color: #8a93a3; }
+#case-form TextArea { height: 5; }

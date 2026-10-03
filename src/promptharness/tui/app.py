@@ -50,6 +50,9 @@ class PromptHarnessApp(App):
     def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
         if event.pane.id == "providers":
             self.call_after_refresh(self.query_one("#providers-table").focus)
+        elif event.pane.id == "studio":
+            self.query_one(StudioPane).refresh_models()
+            self.call_after_refresh(self.query_one("#cases").focus)
 
     def on_unmount(self) -> None:
         try:

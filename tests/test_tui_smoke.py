@@ -1,12 +1,21 @@
 from __future__ import annotations
 
 from conftest import FakeClient
-from textual.widgets import DataTable, Input, TabbedContent
+from textual.widgets import (
+    DataTable,
+    Input,
+    ListView,
+    RichLog,
+    Select,
+    TabbedContent,
+    TextArea,
+)
 
 from promptharness.core.client import ClientError
 from promptharness.core.db import Database
-from promptharness.core.models import Provider
+from promptharness.core.models import Case, Expectation, Match, PromptVersion, Provider
 from promptharness.tui.app import PromptHarnessApp
+from promptharness.tui.studio import PromptHistory, StudioPane
 
 
 def make_db(tmp_path) -> Database:
@@ -231,3 +240,469 @@ async def test_landing_on_providers_focuses_table(tmp_path):
         await pilot.press("1", "4")
         await pilot.pause()
         assert app.focused is app.query_one("#providers-table")
+
+
+# ---------------------------------------------------------------- studio
+
+
+def test_prompt_history_undo_redo():
+    h = PromptHistory()
+    assert h.undo() is None
+    a, b, c = (PromptVersion(template=t) for t in ("a", "b", "c"))
+    h.push(a)
+    assert h.undo() is None  # at start
+    h.push(b)
+    h.push(b)  # identical hash stored once
+    h.push(PromptVersion(template="b"))
+    h.push(c)
+    assert len(h) == 3
+    assert h.undo().template == "b"
+    assert h.undo().template == "a"
+    assert h.undo() is None
+    assert h.redo().template == "b"
+    assert h.redo().template == "c"
+    assert h.redo() is None
+    # pushing after undo drops the redo branch
+    h.undo()
+    h.push(PromptVersion(template="d"))
+    assert h.redo() is None
+    assert h.undo().template == "b"
+
+
+def studio_db(tmp_path) -> Database:
+    db = make_db(tmp_path)
+    db.save_provider(Provider(name="p", base_url="https://p.test", api_key_env="K"))
+    db.save_models("p", ["m1", "m2"])
+    db.save_provider(Provider(name="off", base_url="https://o.test", api_key_env="K",
+                              enabled=False))
+    db.save_models("off", ["hidden"])
+    return db
+
+
+async def open_studio(app, pilot, model: str | None = "p:m1") -> StudioPane:
+    await pilot.press("2")
+    await pilot.pause()
+    pane = app.query_one(StudioPane)
+    if model is not None:
+        app.query_one("#model", Select).value = model
+        await pilot.pause()
+    return pane
+
+
+async def settle(app, pilot) -> None:
+    await pilot.pause()
+    await app.workers.wait_for_complete()
+    await pilot.pause()
+
+
+def log_text(app) -> str:
+    log = app.query_one("#output", RichLog)
+    return "\n".join("".join(seg.text for seg in strip) for strip in log.lines)
+
+
+async def test_studio_model_options_from_enabled_providers(tmp_path):
+    app = PromptHarnessApp(db=studio_db(tmp_path), client=FakeClient([]))
+    async with app.run_test() as pilot:
+        await open_studio(app, pilot, model=None)
+        values = [v for _, v in app.query_one("#model", Select)._options if v != Select.NULL]
+        assert values == ["p:m1", "p:m2"]
+        manual = app.query_one("#manual-model", Input)
+        manual.focus()
+        manual.value = "x:custom"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.query_one("#model", Select).value == "x:custom"
+        manual.value = "nocolon"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert any("provider:model" in n.message for n in app._notifications)
+
+
+async def test_studio_run_one_case_shows_output(tmp_path):
+    client = FakeClient(["hello"])
+    app = PromptHarnessApp(db=studio_db(tmp_path), client=client)
+    async with app.run_test() as pilot:
+        pane = await open_studio(app, pilot)
+        app.query_one("#system", TextArea).text = "be nice"
+        app.query_one("#template", TextArea).text = "Say: {{ input }}"
+        app.query_one("#temperature", Input).value = "0.5"
+        await pane.add_case(Case(name="c1", input="hi"))
+        app.query_one("#cases", ListView).focus()
+        await pilot.press("r")
+        await settle(app, pilot)
+        assert "hello" in pane.output_text
+        assert "hello" in log_text(app)
+        assert "c1" in pane.output_text and "MANUAL" in pane.output_text
+        call = client.calls[0]
+        assert call["model"] == "m1" and call["provider"].name == "p"
+        assert call["messages"] == [{"role": "system", "content": "be nice"},
+                                    {"role": "user", "content": "Say: hi"}]
+        assert call["params"].temperature == 0.5 and call["params"].max_tokens is None
+
+
+async def test_studio_run_all_reports_each_case_and_checks(tmp_path):
+    client = FakeClient(["yes it is", "nope"])
+    app = PromptHarnessApp(db=studio_db(tmp_path), client=client)
+    async with app.run_test() as pilot:
+        pane = await open_studio(app, pilot)
+        exp = Expectation(must_include=[Match(pattern="yes")])
+        await pane.add_case(Case(name="a", input="1", expectation=exp))
+        await pane.add_case(Case(name="b", input="2", expectation=exp))
+        app.query_one("#cases", ListView).focus()
+        await pilot.press("R")
+        await settle(app, pilot)
+        assert len(client.calls) == 2
+        assert pane.result_for("a").status == "pass"
+        assert pane.result_for("b").status == "fail"
+        assert "PASS" in pane.output_text and "FAIL" in pane.output_text
+        assert "include:yes" in pane.output_text
+        assert "pattern not found" in pane.output_text
+
+
+async def test_studio_failure_shown_not_crash(tmp_path):
+    client = FakeClient([ClientError("timeout", "request timed out")])
+    app = PromptHarnessApp(db=studio_db(tmp_path), client=client)
+    async with app.run_test() as pilot:
+        pane = await open_studio(app, pilot)
+        await pane.add_case(Case(name="c1", input="hi"))
+        app.query_one("#cases", ListView).focus()
+        await pilot.press("r")
+        await settle(app, pilot)
+        assert app.is_running
+        assert "timeout" in pane.output_text
+        assert pane.result_for("c1").status == "error"
+
+
+async def test_studio_template_and_provider_errors_shown(tmp_path):
+    app = PromptHarnessApp(db=studio_db(tmp_path), client=FakeClient([]))
+    async with app.run_test() as pilot:
+        pane = await open_studio(app, pilot)
+        app.query_one("#template", TextArea).text = "{{ nope }}"
+        await pane.add_case(Case(name="c1", input="hi"))
+        await pane.add_case(Case(name="c2", documents=[str(tmp_path / "missing.txt")]))
+        app.query_one("#cases", ListView).focus()
+        await pilot.press("R")
+        await settle(app, pilot)
+        assert "nope" in pane.output_text and "unsupported" in pane.output_text
+        manual = app.query_one("#manual-model", Input)  # manual pick of disabled provider
+        manual.focus()
+        manual.value = "off:hidden"
+        await pilot.press("enter")
+        await pilot.pause()
+        app.query_one("#cases", ListView).focus()
+        await pilot.press("r")
+        await settle(app, pilot)
+        assert "disabled" in pane.output_text
+        assert app.is_running
+
+
+async def test_studio_run_without_model_or_cases_is_reported(tmp_path):
+    app = PromptHarnessApp(db=studio_db(tmp_path), client=FakeClient([]))
+    async with app.run_test() as pilot:
+        pane = await open_studio(app, pilot, model=None)
+        app.query_one("#cases", ListView).focus()
+        await pilot.press("R")
+        await settle(app, pilot)
+        await pane.add_case(Case(name="c1"))
+        await pilot.press("r")
+        await settle(app, pilot)
+        assert any("model" in n.message.lower() for n in app._notifications)
+        app.query_one("#model", Select).value = "p:m1"
+        app.query_one("#max_tokens", Input).value = "lots"
+        await pilot.press("r")
+        await settle(app, pilot)
+        assert any("max tokens" in n.message.lower() for n in app._notifications)
+        assert app.is_running
+
+
+async def test_studio_case_new_edit_delete_via_keys(tmp_path):
+    app = PromptHarnessApp(db=studio_db(tmp_path), client=FakeClient([]))
+    async with app.run_test() as pilot:
+        pane = await open_studio(app, pilot)
+        lv = app.query_one("#cases", ListView)
+        lv.focus()
+        await pilot.press("n")
+        await pilot.pause()
+        s = app.screen
+        s.query_one("#case-name", Input).value = "first"
+        s.query_one("#case-input", TextArea).text = "the input"
+        s.query_one("#case-docs", Input).value = "a.txt, b.txt"
+        s.query_one("#must-include", TextArea).text = "foo\nba+r"
+        s.query_one("#must-not-include", TextArea).text = "bad"
+        s.query_one("#regex").value = True
+        s.query_one("#match-mode", Select).value = "normalized"
+        s.query_one("#match-text", TextArea).text = "Hello  World"
+        s.query_one("#json-output").value = True
+        s.query_one("#judge-prompt", TextArea).text = "is it polite?"
+        s.query_one("#case-submit").press()
+        await pilot.pause()
+        assert [c.name for c in pane.cases] == ["first"]
+        c = pane.cases[0]
+        assert c.input == "the input" and c.documents == ["a.txt", "b.txt"]
+        e = c.expectation
+        assert [(m.pattern, m.regex) for m in e.must_include] == [("foo", True), ("ba+r", True)]
+        assert [m.pattern for m in e.must_not_include] == ["bad"]
+        assert e.normalized == "Hello  World" and e.exact is None
+        assert e.json_output is True and e.judge_prompt == "is it polite?"
+
+        # duplicate name rejected
+        lv.focus()
+        await pilot.press("n")
+        await pilot.pause()
+        app.screen.query_one("#case-name", Input).value = "first"
+        app.screen.query_one("#case-submit").press()
+        await pilot.pause()
+        assert app.screen.query("#case-submit")
+        assert any("exists" in n.message for n in app._notifications)
+        app.screen.query_one("#case-cancel").press()
+        await pilot.pause()
+
+        # edit via Enter, prefilled
+        lv.focus()
+        lv.index = 0
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.screen.query_one("#case-name", Input).value == "first"
+        assert app.screen.query_one("#case-docs", Input).value == "a.txt, b.txt"
+        assert app.screen.query_one("#match-mode", Select).value == "normalized"
+        app.screen.query_one("#case-name", Input).value = "renamed"
+        app.screen.query_one("#case-submit").press()
+        await pilot.pause()
+        assert [c.name for c in pane.cases] == ["renamed"]
+        assert pane.cases[0].expectation.judge_prompt == "is it polite?"
+
+        lv.focus()
+        await pilot.press("x")
+        await pilot.pause()
+        assert pane.cases == []
+        assert len(lv.children) == 0
+
+
+async def test_studio_typing_in_editors_does_not_trigger_actions(tmp_path):
+    client = FakeClient([])
+    app = PromptHarnessApp(db=studio_db(tmp_path), client=client)
+    async with app.run_test() as pilot:
+        pane = await open_studio(app, pilot)
+        await pane.add_case(Case(name="c1"))
+        ta = app.query_one("#template", TextArea)
+        ta.text = ""
+        ta.focus()
+        await pilot.press("n", "x", "r", "R", "s", "v", "q", "2", "4")
+        await settle(app, pilot)
+        assert ta.text == "nxrRsvq24"
+        assert app.is_running
+        assert app.query_one(TabbedContent).active == "studio"
+        assert client.calls == []
+        assert len(pane.cases) == 1
+        assert not app.screen.query("#case-submit") and not app.screen.query("#save-name")
+        sysarea = app.query_one("#system", TextArea)
+        sysarea.focus()
+        await pilot.press("r", "s")
+        await settle(app, pilot)
+        assert sysarea.text.endswith("rs")
+        assert client.calls == []
+
+
+async def test_studio_prompt_history_keys(tmp_path):
+    app = PromptHarnessApp(db=studio_db(tmp_path), client=FakeClient(["o1", "o2"]))
+    async with app.run_test() as pilot:
+        pane = await open_studio(app, pilot)
+        await pane.add_case(Case(name="c1"))
+        ta = app.query_one("#template", TextArea)
+        lv = app.query_one("#cases", ListView)
+        ta.text = "v1 {{ input }}"
+        lv.focus()
+        await pilot.press("r")
+        await settle(app, pilot)
+        ta.text = "v2 {{ input }}"
+        app.query_one("#temperature", Input).value = "0.7"
+        lv.focus()
+        await pilot.press("r")
+        await settle(app, pilot)
+        await pilot.press("ctrl+z")
+        await pilot.pause()
+        assert ta.text == "v1 {{ input }}"
+        assert app.query_one("#temperature", Input).value == ""
+        await pilot.press("ctrl+y")
+        await pilot.pause()
+        assert ta.text == "v2 {{ input }}"
+        assert app.query_one("#temperature", Input).value == "0.7"
+
+
+async def test_studio_edit_pause_snapshots_history(tmp_path):
+    app = PromptHarnessApp(db=studio_db(tmp_path), client=FakeClient([]))
+    async with app.run_test() as pilot:
+        pane = await open_studio(app, pilot)
+        pane.HISTORY_PAUSE = 0.05
+        ta = app.query_one("#template", TextArea)
+        ta.focus()
+        await pilot.press("A")
+        await pilot.pause(0.2)
+        after_a = ta.text
+        await pilot.press("B")
+        await pilot.pause(0.2)
+        assert ta.text != after_a
+        app.query_one("#cases", ListView).focus()
+        await pilot.press("ctrl+z")
+        await pilot.pause()
+        assert ta.text == after_a
+
+
+async def test_judge_same_as_model_warns(tmp_path):
+    app = PromptHarnessApp(db=studio_db(tmp_path), client=FakeClient([]))
+    async with app.run_test() as pilot:
+        await open_studio(app, pilot)
+        judge = app.query_one("#judge", Select)
+        assert judge.value == Select.NULL
+        judge.value = "p:m1"
+        await pilot.pause()
+        assert any("judge" in n.message.lower() and n.severity == "warning"
+                   for n in app._notifications)
+
+
+async def _run_and_save(app, pilot, pane, name):
+    app.query_one("#cases", ListView).focus()
+    await pilot.press("R")
+    await settle(app, pilot)
+    await pilot.press("s")
+    await pilot.pause()
+    app.screen.query_one("#save-name", Input).value = name
+    app.screen.query_one("#save-description", Input).value = "desc"
+    app.screen.query_one("#save-submit").press()
+    await pilot.pause()
+
+
+async def test_save_as_harness_persists_harness_and_accepted_run(tmp_path):
+    db = studio_db(tmp_path)
+    app = PromptHarnessApp(db=db, client=FakeClient(["out-a", "out-b"]))
+    async with app.run_test() as pilot:
+        pane = await open_studio(app, pilot)
+        app.query_one("#template", TextArea).text = "T {{ input }}"
+        await pane.add_case(Case(name="a", input="1"))
+        await pane.add_case(Case(name="b", input="2"))
+        await _run_and_save(app, pilot, pane, "my-harness")
+        h = db.get_harness("my-harness")
+        assert h is not None
+        assert h.description == "desc"
+        assert h.prompt.template == "T {{ input }}"
+        assert [c.name for c in h.cases] == ["a", "b"]
+        assert str(h.accepted_model) == "p:m1"
+        assert h.accepted_run_id is not None
+        run = db.get_run(h.accepted_run_id)
+        assert run.harness == "my-harness" and run.prompt_hash == h.prompt.hash
+        assert sorted(r.output for r in run.results) == ["out-a", "out-b"]
+        assert [r.case_name for r in run.results] == ["a", "b"]
+
+
+async def test_save_existing_name_asks_to_overwrite(tmp_path):
+    db = studio_db(tmp_path)
+    app = PromptHarnessApp(db=db, client=FakeClient(["one", "two"]))
+    async with app.run_test() as pilot:
+        pane = await open_studio(app, pilot)
+        await pane.add_case(Case(name="a"))
+        await _run_and_save(app, pilot, pane, "h")
+        first = db.get_harness("h").accepted_run_id
+        app.query_one("#template", TextArea).text = "changed {{ input }}"
+        await _run_and_save(app, pilot, pane, "h")
+        assert app.screen.query("#confirm-yes")  # confirmation asked
+        app.screen.query_one("#confirm-no").press()
+        await pilot.pause()
+        assert db.get_harness("h").accepted_run_id == first
+        await pilot.press("s")
+        await pilot.pause()
+        assert app.screen.query_one("#save-name", Input).value == "h"
+        app.screen.query_one("#save-submit").press()
+        await pilot.pause()
+        app.screen.query_one("#confirm-yes").press()
+        await pilot.pause()
+        h = db.get_harness("h")
+        assert h.prompt.template == "changed {{ input }}"
+        assert db.get_run(h.accepted_run_id).results[0].output == "two"
+
+
+async def test_save_with_stale_results_saves_without_them(tmp_path):
+    db = studio_db(tmp_path)
+    app = PromptHarnessApp(db=db, client=FakeClient(["one"]))
+    async with app.run_test() as pilot:
+        pane = await open_studio(app, pilot)
+        await pane.add_case(Case(name="a"))
+        app.query_one("#cases", ListView).focus()
+        await pilot.press("r")
+        await settle(app, pilot)
+        app.query_one("#template", TextArea).text = "edited after run {{ input }}"
+        await pilot.press("s")
+        await pilot.pause()
+        app.screen.query_one("#save-name", Input).value = "h"
+        app.screen.query_one("#save-submit").press()
+        await pilot.pause()
+        h = db.get_harness("h")
+        assert h is not None and h.accepted_run_id is None
+        assert any("no results" in n.message.lower() for n in app._notifications)
+
+
+async def test_manual_verdict_key_updates_status(tmp_path):
+    app = PromptHarnessApp(db=studio_db(tmp_path), client=FakeClient(["meh"]))
+    async with app.run_test() as pilot:
+        pane = await open_studio(app, pilot)
+        await pane.add_case(Case(name="c1"))
+        app.query_one("#cases", ListView).focus()
+        await pilot.press("r")
+        await settle(app, pilot)
+        assert pane.result_for("c1").status == "manual"
+        await pilot.press("v")
+        await pilot.pause()
+        await pilot.press("y")
+        await pilot.pause()
+        r = pane.result_for("c1")
+        assert r.status == "pass" and r.manual_verdict is True
+        await pilot.press("v")
+        await pilot.pause()
+        await pilot.press("n")
+        await pilot.pause()
+        assert pane.result_for("c1").status == "fail"
+        assert "FAIL" in pane.output_text
+
+
+async def test_manual_verdict_after_save_updates_db(tmp_path):
+    db = studio_db(tmp_path)
+    app = PromptHarnessApp(db=db, client=FakeClient(["meh"]))
+    async with app.run_test() as pilot:
+        pane = await open_studio(app, pilot)
+        await pane.add_case(Case(name="c1"))
+        await _run_and_save(app, pilot, pane, "h")
+        app.query_one("#cases", ListView).focus()
+        await pilot.press("v")
+        await pilot.pause()
+        await pilot.press("y")
+        await pilot.pause()
+        run = db.get_run(db.get_harness("h").accepted_run_id)
+        assert run.results[0].manual_verdict is True
+        assert run.results[0].status == "pass"
+        assert pane.result_for("c1").status == "pass"
+
+
+async def test_manual_verdict_without_result_warns(tmp_path):
+    app = PromptHarnessApp(db=studio_db(tmp_path), client=FakeClient([]))
+    async with app.run_test() as pilot:
+        pane = await open_studio(app, pilot)
+        await pane.add_case(Case(name="c1"))
+        app.query_one("#cases", ListView).focus()
+        await pilot.press("v")
+        await pilot.pause()
+        assert any("no result" in n.message.lower() for n in app._notifications)
+
+
+async def test_leaving_studio_with_editor_focused_does_not_bounce_back(tmp_path):
+    app = PromptHarnessApp(db=studio_db(tmp_path), client=FakeClient([]))
+    async with app.run_test() as pilot:
+        await open_studio(app, pilot)
+        tabs = app.query_one(TabbedContent)
+        for wid in ("#template", "#system", "#cases", "#model"):
+            await pilot.press("2")
+            await pilot.pause()
+            app.query_one(wid).focus()
+            await pilot.pause()
+            tabs.active = "runs"  # e.g. a mouse click on the tab
+            await pilot.pause()
+            await pilot.pause()
+            assert tabs.active == "runs", wid
