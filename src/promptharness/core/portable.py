@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from typing import Any, Literal
 
@@ -15,6 +16,7 @@ from promptharness.core.models import (
     Run,
 )
 from promptharness.core.status import final_status
+from promptharness.paths import home_dir
 
 FORMAT_VERSION = 1
 
@@ -42,8 +44,8 @@ def export_harness(
                 try:
                     with open(path, encoding="utf-8") as f:
                         texts.append({"name": path, "text": f.read()})
-                except (OSError, UnicodeDecodeError):
-                    texts.append({"name": path, "text": ""})
+                except (OSError, UnicodeDecodeError) as e:
+                    raise PortableError(f"cannot read document {path}: {e}") from e
             case_dict["document_texts"] = texts
     if h.accepted_model is not None:
         data["accepted_model"] = str(h.accepted_model)
@@ -57,6 +59,13 @@ def export_harness(
 
 
 def parse_harness(text: str, fmt: str | None = None) -> tuple[Harness, dict[str, str]]:
+    harness, outputs, _ = _parse(text, fmt)
+    return harness, outputs
+
+
+def _parse(
+    text: str, fmt: str | None = None
+) -> tuple[Harness, dict[str, str], dict[str, dict[str, str]]]:
     if fmt is None:
         fmt = "json" if text.lstrip().startswith("{") else "yaml"
     try:
@@ -84,42 +93,102 @@ def parse_harness(text: str, fmt: str | None = None) -> tuple[Harness, dict[str,
     if not isinstance(outputs, dict):
         raise PortableError("accepted_outputs must be a mapping")
     data.pop("accepted_run_id", None)
+    doc_texts: dict[str, dict[str, str]] = {}
+    for c in data.get("cases") or []:
+        if not isinstance(c, dict):
+            continue
+        entries = c.pop("document_texts", None) or []
+        try:
+            doc_texts[str(c.get("name"))] = {str(e["name"]): str(e["text"]) for e in entries}
+        except (TypeError, KeyError) as e:
+            raise PortableError(f"invalid document_texts in case {c.get('name')!r}") from e
     try:
         if data.get("accepted_model") is not None:
             data["accepted_model"] = ModelRef.parse(str(data["accepted_model"]))
         harness = Harness.model_validate(data)
     except (ValidationError, ValueError) as e:
         raise PortableError(f"invalid harness: {e}") from e
-    return harness, {str(k): str(v) for k, v in outputs.items()}
+    outputs = {str(k): str(v) for k, v in outputs.items()}
+    if outputs:
+        if harness.accepted_model is None:
+            raise PortableError("accepted_outputs present but accepted_model is missing")
+        unknown = sorted(set(outputs) - {c.name for c in harness.cases})
+        if unknown:
+            raise PortableError(f"accepted_outputs name unknown cases: {', '.join(unknown)}")
+    return harness, outputs, doc_texts
+
+
+def _safe_component(name: str) -> str:
+    base = os.path.basename(name.replace("\\", "/"))
+    if base in ("", ".", ".."):
+        base = "document"
+    return base
+
+
+def _restore_documents(harness: Harness, doc_texts: dict[str, dict[str, str]]) -> Harness:
+    root = home_dir() / "documents" / _safe_component(harness.name)
+    used: set[str] = set()
+    cases = []
+    for case in harness.cases:
+        texts = doc_texts.get(case.name, {})
+        new_docs = []
+        for path in case.documents:
+            if os.path.exists(path) or path not in texts:
+                new_docs.append(path)
+                continue
+            fname = _safe_component(path)
+            if fname in used:
+                fname = f"{len(used)}_{fname}"
+            used.add(fname)
+            root.mkdir(parents=True, exist_ok=True)
+            target = root / fname
+            target.write_text(texts[path], encoding="utf-8")
+            new_docs.append(str(target))
+        cases.append(case.model_copy(update={"documents": new_docs}))
+    return harness.model_copy(update={"cases": cases})
 
 
 def import_harness(db: Database, text: str, overwrite: bool = False) -> Harness:
-    harness, outputs = parse_harness(text)
-    if db.get_harness(harness.name) is not None and not overwrite:
+    harness, outputs, doc_texts = _parse(text)
+    previous = db.get_harness(harness.name)
+    if previous is not None and not overwrite:
         raise PortableError(f"harness '{harness.name}' exists")
-    db.save_harness(harness)
-    if outputs and harness.accepted_model is not None:
-        now = datetime.now(timezone.utc).isoformat()
-        results = []
-        for c in harness.cases:
-            if c.name in outputs:
-                results.append(
-                    CaseResult(
-                        case_name=c.name,
-                        status=final_status([], None, False, None),
-                        output=outputs[c.name],
-                    )
+    try:
+        harness = _restore_documents(harness, doc_texts)
+        db.save_harness(harness)
+        if outputs and harness.accepted_model is not None:
+            now = datetime.now(timezone.utc).isoformat()
+            results = [
+                CaseResult(
+                    case_name=c.name,
+                    status=final_status([], None, False, None),
+                    output=outputs[c.name],
                 )
-        run = Run(
-            harness=harness.name,
-            prompt_hash=harness.prompt.hash,
-            model=harness.accepted_model,
-            started_at=now,
-            finished_at=now,
-            results=results,
-        )
-        run_id = db.save_run(run)
-        db.set_accepted(harness.name, harness.accepted_model, run_id)
-    saved = db.get_harness(harness.name)
-    assert saved is not None
+                for c in harness.cases
+                if c.name in outputs
+            ]
+            run = Run(
+                harness=harness.name,
+                prompt_hash=harness.prompt.hash,
+                model=harness.accepted_model,
+                started_at=now,
+                finished_at=now,
+                results=results,
+            )
+            run_id = db.save_run(run)
+            db.set_accepted(harness.name, harness.accepted_model, run_id)
+        saved = db.get_harness(harness.name)
+    except Exception as e:
+        # Compensating rollback. Known limitation: Database has no delete_run, so a
+        # run saved before a later failure (set_accepted) would remain as an orphan.
+        try:
+            if previous is not None:
+                db.save_harness(previous)
+            else:
+                db.delete_harness(harness.name)
+        except Exception:
+            pass
+        raise PortableError(f"import failed: {e}") from e
+    if saved is None:
+        raise PortableError(f"import failed: harness '{harness.name}' not saved")
     return saved

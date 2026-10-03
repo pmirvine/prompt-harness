@@ -128,3 +128,95 @@ def test_malformed_yaml_raises_portable_error():
         parse_harness("a: [unclosed\n  : :")
     with pytest.raises(PortableError):
         parse_harness("{bad json", "json")
+
+
+def test_inline_documents_restored_on_import(db, tmp_path):
+    from promptharness.core.render import load_documents
+    h = seed(db, tmp_path)
+    text = export_harness(db, "h", inline_documents=True)
+    db.delete_harness("h")
+    import os
+    os.remove(h.cases[0].documents[0])
+    out = import_harness(db, text)
+    path = out.cases[0].documents[0]
+    assert path != h.cases[0].documents[0]
+    assert str(tmp_path / "ph-home") in path
+    assert load_documents([path])[0].text == "doc body"
+
+
+def test_existing_document_paths_left_alone(db, tmp_path):
+    h = seed(db, tmp_path)
+    text = export_harness(db, "h", inline_documents=True)
+    out = import_harness(db, text, overwrite=True)
+    assert out.cases[0].documents == h.cases[0].documents
+
+
+def test_inline_document_path_traversal_neutralised(db, tmp_path):
+    import json
+    text = json.dumps({
+        "format_version": 1, "name": "h", "prompt": {"template": "t"},
+        "cases": [{"name": "a", "documents": ["../evil"],
+                   "document_texts": [{"name": "../evil", "text": "pwn"}]}],
+    })
+    out = import_harness(db, text)
+    home = tmp_path / "ph-home"
+    p = out.cases[0].documents[0]
+    from pathlib import Path
+    base = (home / "documents" / "h").resolve()
+    assert Path(p).resolve().parent == base
+    assert Path(p).read_text() == "pwn"
+    assert not (home / "documents" / "evil").exists()
+    assert not (home / "evil").exists()
+
+
+def test_export_unreadable_inline_document_raises(db, tmp_path):
+    h = seed(db, tmp_path)
+    import os
+    os.remove(h.cases[0].documents[0])
+    with pytest.raises(PortableError, match="doc.txt"):
+        export_harness(db, "h", inline_documents=True)
+
+
+def _snapshot(db):
+    return ([h.model_dump() for h in db.list_harnesses()], len(db.list_runs()))
+
+
+def test_import_atomic_fresh(db, tmp_path, monkeypatch):
+    seed(db, tmp_path)
+    text = export_harness(db, "h")
+    db.delete_harness("h")
+    before = _snapshot(db)
+    def boom(run):
+        raise RuntimeError("boom")
+    monkeypatch.setattr(db, "save_run", boom)
+    with pytest.raises(PortableError):
+        import_harness(db, text)
+    assert _snapshot(db) == before
+
+
+def test_import_atomic_overwrite(db, tmp_path, monkeypatch):
+    seed(db, tmp_path)
+    text = export_harness(db, "h").replace("description: d", "description: new")
+    before = _snapshot(db)
+    def boom(run):
+        raise RuntimeError("boom")
+    monkeypatch.setattr(db, "save_run", boom)
+    with pytest.raises(PortableError):
+        import_harness(db, text, overwrite=True)
+    assert _snapshot(db) == before
+
+
+def test_accepted_outputs_without_model_rejected(db):
+    text = ("format_version: 1\nname: z\nprompt: {template: t}\ncases: [{name: a}]\n"
+            "accepted_outputs: {a: x}\n")
+    with pytest.raises(PortableError, match="accepted_model"):
+        import_harness(db, text)
+    assert db.list_harnesses() == []
+
+
+def test_accepted_outputs_unknown_case_rejected(db):
+    text = ("format_version: 1\nname: z\nprompt: {template: t}\ncases: [{name: a}]\n"
+            "accepted_model: p:m\naccepted_outputs: {ghost: x}\n")
+    with pytest.raises(PortableError, match="ghost"):
+        import_harness(db, text)
+    assert db.list_harnesses() == []
