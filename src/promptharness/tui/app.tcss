@@ -32,3 +32,12 @@ CaseForm, SaveForm, ConfirmModal, VerdictModal { align: center middle; }
 #case-form { width: 72; height: 90%; padding: 1 2; border: round #4a5568; background: #181b22; }
 #case-form Label { margin-top: 1; color: #8a93a3; }
 #case-form TextArea { height: 5; }
+HarnessesPane, RunsPane { height: 1fr; }
+RegressionForm, ExportForm, ImportForm { align: center middle; }
+#regression-models { height: 8; border: round #4a5568; background: #101216; }
+.form-error { color: #ff6b6b; }
+#matrix-title, #detail-title { color: #7fd1b9; text-style: bold; padding: 0 1; }
+#matrix-status { color: #8a93a3; padding: 0 1; }
+#matrix { height: 1fr; }
+#detail-scroll { height: 1fr; padding: 0 1; }
+#form.compact Label { margin-top: 0; }

@@ -44,15 +44,32 @@ class PromptHarnessApp(App):
                 yield ProvidersPane(id="providers-pane")
         yield Footer()
 
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        # Tabs live on the default screen; don't switch them underneath a pushed screen.
+        if action == "tab" and self.screen is not self.default_screen:
+            return False
+        return True
+
     def action_tab(self, name: str) -> None:
         self.query_one(TabbedContent).active = name
 
     def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
-        if event.pane.id == "providers":
-            self.call_after_refresh(self.query_one("#providers-table").focus)
-        elif event.pane.id == "studio":
+        tab = event.pane.id
+        if tab == "harnesses":
+            self.query_one(HarnessesPane).refresh_table()
+        elif tab == "runs":
+            self.query_one(RunsPane).refresh_table()
+        elif tab == "studio":
             self.query_one(StudioPane).refresh_models()
-            self.call_after_refresh(self.query_one("#cases").focus)
+        target = {"harnesses": "#harnesses-table", "studio": "#cases",
+                  "runs": "#runs-table", "providers": "#providers-table"}.get(tab or "")
+        if target is not None:
+            self.call_after_refresh(self._focus_if_active, tab, target)
+
+    def _focus_if_active(self, tab: str, selector: str) -> None:
+        # Deferred: if the user already switched again, focusing would bounce tabs back.
+        if self.query_one(TabbedContent).active == tab:
+            self.query_one(selector).focus()
 
     def on_unmount(self) -> None:
         try:

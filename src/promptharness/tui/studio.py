@@ -23,15 +23,13 @@ from textual.widgets import (
 
 from promptharness.core.models import Case, CaseResult, Harness, ModelRef, PromptVersion
 from promptharness.core.runner import run_harness
-from promptharness.core.status import final_status
-from promptharness.tui.studio_modals import CaseForm, ConfirmModal, SaveForm, VerdictModal
+from promptharness.tui.studio_modals import CaseForm
+from promptharness.tui.studio_persist import StudioPersistMixin
 from promptharness.tui.studio_support import (
-    STATUS_STYLE,
     PromptHistory,
     StudioEntry,
     format_result,
     now_iso,
-    save_accepted_run,
 )
 
 __all__ = ["PromptHistory", "StudioPane"]
@@ -59,7 +57,7 @@ class CaseList(ListView):
         await getattr(pane, f"action_{name}")()
 
 
-class StudioPane(Widget):
+class StudioPane(StudioPersistMixin, Widget):
     HISTORY_PAUSE = 2.0
     BINDINGS = [
         Binding("ctrl+z", "history_undo", "Prompt back"),
@@ -378,94 +376,3 @@ class StudioPane(Widget):
         self._entries[r.case_name] = entry
         self._set_label(idx, self._label(self.cases[idx]))
         self._write(format_result(r, entry.model))
-
-    # -- verdict ----------------------------------------------------------
-    async def action_verdict(self) -> None:
-        idx = self._selected_index()
-        entry = self._entries.get(self.cases[idx].name) if idx is not None else None
-        if entry is None:
-            self.notify("No result for the selected case; run it first", severity="warning")
-            return
-
-        def done(choice: str | None) -> None:
-            if choice is None:
-                return
-            verdict = {"pass": True, "fail": False, "clear": None}[choice]
-            self._apply_verdict(entry, verdict)
-
-        self.app.push_screen(VerdictModal(entry.result.case_name), done)
-
-    def _apply_verdict(self, entry: StudioEntry, verdict: bool | None) -> None:
-        r = entry.result
-        if r.id is not None:
-            try:
-                saved = self.db.set_manual_verdict(r.id, verdict)
-            except Exception as e:
-                self.notify(f"Could not save verdict: {e}", severity="error")
-                return
-            r.status, r.manual_verdict = saved.status, saved.manual_verdict
-        else:
-            r.manual_verdict = verdict
-            r.status = final_status(r.checks, r.error, entry.judge_error, verdict)
-        if r.case_name in self._entries:
-            idx = next(i for i, c in enumerate(self.cases) if c.name == r.case_name)
-            self._set_label(idx, self._label(self.cases[idx]))
-        self._write(Text(f"verdict: {r.case_name} → {r.status.upper()}",
-                         style=STATUS_STYLE.get(r.status, "bold")))
-
-    # -- save -----------------------------------------------------------
-    async def action_save(self) -> None:
-        if self._busy():
-            return
-        try:
-            self.current_prompt()
-        except ValueError as e:
-            self.notify(str(e), severity="error")
-            return
-
-        def chosen(answer: tuple[str, str] | None) -> None:
-            if answer is None:
-                return
-            name, desc = answer
-            try:
-                exists = self.db.get_harness(name) is not None
-            except Exception as e:  # never crash the UI
-                self.notify(f"Save failed: {type(e).__name__}: {e}", severity="error")
-                return
-            if not exists:
-                self._save(name, desc)
-                return
-
-            def confirmed(yes: bool | None) -> None:
-                if yes:
-                    self._save(name, desc)
-
-            self.app.push_screen(
-                ConfirmModal(f"Harness {name!r} exists. Overwrite it?"), confirmed)
-
-        self.app.push_screen(SaveForm(*self._saved_as), chosen)
-
-    def _save(self, name: str, description: str) -> None:
-        try:
-            prompt = self.current_prompt()
-            model = self._ref("#model")
-            judge = self._ref("#judge")
-            harness = Harness(name=name, description=description, prompt=prompt,
-                              cases=list(self.cases), accepted_model=model)
-            entries = [self._entries[c.name] for c in self.cases
-                       if c.name in self._entries and self._entries[c.name].case == c]
-            fresh = [e for e in entries if model is not None and e.model == model
-                     and e.judge == judge and e.prompt_hash == prompt.hash]
-            self.db.save_harness(harness)
-            self._saved_as = (name, description)
-            if not fresh:
-                self.notify(f"Saved {name!r}; no results for the current prompt, model and judge, "
-                            "so no accepted run was stored", severity="warning")
-                return
-            run_id = save_accepted_run(self.db, name, prompt.hash, model, judge, fresh)
-        except Exception as e:  # never crash the UI
-            self.notify(f"Save failed: {type(e).__name__}: {e}", severity="error")
-            return
-        skipped = len(self.cases) - len(fresh)
-        extra = f" ({skipped} case(s) without current results not included)" if skipped else ""
-        self.notify(f"Saved harness {name!r} with accepted run #{run_id}{extra}")
