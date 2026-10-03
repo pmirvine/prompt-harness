@@ -100,6 +100,17 @@ class HarnessesPane(Widget):
         if h is None:
             return
         studio = self.screen.query_one(StudioPane)
+        if studio.is_dirty():
+            async def confirmed(yes: bool | None) -> None:
+                if yes:
+                    await self._open_in_studio(studio, h)
+
+            self.app.push_screen(
+                ConfirmModal(f"Discard unsaved Studio work and open {h.name!r}?"), confirmed)
+            return
+        await self._open_in_studio(studio, h)
+
+    async def _open_in_studio(self, studio, h: Harness) -> None:
         if not await studio.load_harness(h, h.accepted_model):
             return
         # Activate the tab first: StudioPane swallows focus while its tab is hidden.

@@ -13,6 +13,7 @@ from textual.widgets import (
     Select,
     SelectionList,
     TabbedContent,
+    TextArea,
 )
 
 from promptharness.core.client import ClientError
@@ -29,7 +30,7 @@ from promptharness.core.models import (
 from promptharness.tui.app import PromptHarnessApp
 from promptharness.tui.matrix import MatrixScreen, ResultDetail
 from promptharness.tui.studio import StudioPane
-from promptharness.tui.studio_modals import VerdictModal
+from promptharness.tui.studio_modals import ConfirmModal, VerdictModal
 
 
 def make_db(tmp_path) -> Database:
@@ -175,6 +176,86 @@ async def test_studio_load_harness_with_unlisted_model_and_clears_results(tmp_pa
         assert studio.result_for("old") is None
         assert studio.output_text == "" or "loaded" in studio.output_text.lower()
         assert app.query_one("#model", Select).value == "gone:x"
+
+
+async def _dirty_studio(app, pilot) -> StudioPane:
+    await pilot.press("2")
+    await pilot.pause()
+    studio = app.query_one(StudioPane)
+    assert not studio.is_dirty()
+    await studio.add_case(Case(name="mine", input="x"))
+    studio.query_one("#template", TextArea).text = "custom {{ input }}"
+    await pilot.pause()
+    assert studio.is_dirty()
+    return studio
+
+
+async def test_open_harness_over_dirty_studio_decline_keeps_work(tmp_path):
+    db = make_db(tmp_path)
+    db.save_harness(make_harness("h"))
+    app = PromptHarnessApp(db=db, client=FakeClient([]))
+    async with app.run_test() as pilot:
+        studio = await _dirty_studio(app, pilot)
+        await focus_harnesses(app, pilot)
+        await pilot.press("enter")
+        await until(pilot, lambda: isinstance(app.screen, ConfirmModal))
+        await pilot.press("n")
+        await pilot.pause()
+        assert not isinstance(app.screen, ConfirmModal)
+        assert [c.name for c in studio.cases] == ["mine"]
+        assert studio.current_prompt().template == "custom {{ input }}"
+        assert app.query_one(TabbedContent).active == "harnesses"
+    assert app.client.calls == []
+
+
+async def test_open_harness_over_dirty_studio_accept_loads(tmp_path):
+    db = make_db(tmp_path)
+    db.save_harness(make_harness("h"))
+    app = PromptHarnessApp(db=db, client=FakeClient([]))
+    async with app.run_test() as pilot:
+        studio = await _dirty_studio(app, pilot)
+        await focus_harnesses(app, pilot)
+        await pilot.press("enter")
+        await until(pilot, lambda: isinstance(app.screen, ConfirmModal))
+        await pilot.press("y")
+        await until(pilot, lambda: app.query_one(TabbedContent).active == "studio")
+        assert [c.name for c in studio.cases] == ["c1", "c2"]
+        assert studio.current_prompt().template == "Q: {{ input }}"
+        assert not studio.is_dirty()
+
+
+async def test_open_harness_over_clean_studio_loads_without_prompt(tmp_path):
+    db = make_db(tmp_path)
+    db.save_harness(make_harness("h"))
+    db.save_harness(make_harness("other", accepted=None))
+    app = PromptHarnessApp(db=db, client=FakeClient([]))
+    async with app.run_test() as pilot:
+        studio = app.query_one(StudioPane)
+        for name in ("h", "other"):  # a freshly loaded harness is clean too
+            t = await focus_harnesses(app, pilot)
+            t.move_cursor(row=t.get_row_index(name))
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.pause()
+            assert not isinstance(app.screen, ConfirmModal)
+            assert app.query_one(TabbedContent).active == "studio"
+            assert studio._saved_as[0] == name
+
+
+async def test_studio_results_make_it_dirty(tmp_path):
+    db = make_db(tmp_path)
+    app = PromptHarnessApp(db=db, client=FakeClient(["ok"]))
+    async with app.run_test() as pilot:
+        await pilot.press("2")
+        await pilot.pause()
+        studio = app.query_one(StudioPane)
+        await studio.load_harness(make_harness("h"), ModelRef.parse("p:m1"))
+        assert not studio.is_dirty()
+        studio.query_one("#cases", ListView).index = 0
+        await studio.action_run_selected()
+        await settle(app, pilot)
+        assert studio.result_for("c1") is not None
+        assert studio.is_dirty()
 
 
 async def test_duplicate_harness_creates_copy_named_with_suffix(tmp_path):

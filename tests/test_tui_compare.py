@@ -275,10 +275,19 @@ async def test_retest_picks_new_model_and_opens_resulting_run(tmp_path):
         assert len(runs) == 2
         new = next(r for r in runs if r.id != original.id)
         assert str(new.model) == "p:m2"
-        key = matrix.column_keys[0]
+        # the original run sits beside the re-test
+        assert len(matrix.column_keys) == 2
+        orig_key, key = matrix.column_keys
+        assert set(matrix.saved_runs) == {orig_key, key}
+        assert matrix.saved_runs[orig_key].id == original.id
+        assert matrix.saved_runs[key].id == new.id
+        assert matrix.column_model(orig_key) == ModelRef.parse("p:m1")
         assert matrix.column_model(key) == ModelRef.parse("p:m2")
+        assert cell(matrix, "c1", orig_key) == "pass"
         assert cell(matrix, "c1", key) == "pass"
         assert cell(matrix, "c2", key) == "fail"
+        labels = [lbl for lbl, _ in matrix.compare_columns("c1")]
+        assert f"p:m1 #{original.id}" in labels and f"p:m2 #{new.id}" in labels
         assert t.row_count == 2  # runs table refreshed
         assert not notified(app, "prompt changed")
         await pilot.press("escape")
@@ -304,7 +313,8 @@ async def test_retest_manual_entry_unknown_provider_shows_case_errors(tmp_path):
         await until(pilot, lambda: isinstance(app.screen, MatrixScreen))
         await settle(app, pilot)
         matrix = app.screen
-        key = matrix.column_keys[0]
+        assert len(matrix.column_keys) == 2
+        key = matrix.column_keys[-1]
         assert cell(matrix, "c1", key) == "error"
         assert "ghost" in matrix.results[("c1", key)].error
         assert app.is_running

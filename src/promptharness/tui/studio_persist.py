@@ -50,6 +50,7 @@ class StudioPersistMixin:
         else:
             r.manual_verdict = verdict
             r.status = final_status(r.checks, r.error, entry.judge_error, verdict)
+        self._unsaved_results = True
         if r.case_name in self._entries:
             idx = next(i for i, c in enumerate(self.cases) if c.name == r.case_name)
             self._set_label(idx, self._label(self.cases[idx]))
@@ -101,6 +102,7 @@ class StudioPersistMixin:
                      and e.judge == judge and e.prompt_hash == prompt.hash]
             self.db.save_harness(harness)
             self._saved_as = (name, description)
+            self._mark_clean()
             if not fresh:
                 self.notify(f"Saved {name!r}; no results for the current prompt, model and judge, "
                             "so no accepted run was stored", severity="warning")
@@ -112,6 +114,27 @@ class StudioPersistMixin:
         skipped = len(self.cases) - len(fresh)
         extra = f" ({skipped} case(s) without current results not included)" if skipped else ""
         self.notify(f"Saved harness {name!r} with accepted run #{run_id}{extra}")
+
+    # -- dirty tracking --------------------------------------------------
+    def _mark_clean(self) -> None:
+        """Record the current prompt and cases as the clean (loaded/saved) state."""
+        p = self._prompt_or_none()
+        self._baseline = (p.hash if p is not None else None, list(self.cases))
+        self._unsaved_results = False
+
+    def is_dirty(self) -> bool:
+        """True if loading a harness would lose work.
+
+        Dirty means: results (or verdicts) were produced since the studio was last
+        loaded/saved, or the cases or the prompt (system, template, temperature,
+        max tokens) differ from that state. Starts clean (blank studio). The model
+        and judge selections are not considered.
+        """
+        if self._unsaved_results:
+            return True
+        p = self._prompt_or_none()
+        base_hash, base_cases = self._baseline
+        return (p.hash if p is not None else None) != base_hash or self.cases != base_cases
 
     # -- load ------------------------------------------------------------
     async def load_harness(self, harness: Harness, model: ModelRef | None) -> bool:
@@ -150,4 +173,5 @@ class StudioPersistMixin:
         self._log.clear()
         self.query_one("#output", RichLog).clear()
         self._write(Text(f"loaded harness {harness.name!r}", style="dim"))
+        self._mark_clean()
         return True

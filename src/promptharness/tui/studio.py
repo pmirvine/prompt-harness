@@ -79,6 +79,9 @@ class StudioPane(StudioPersistMixin, Widget):
         self._log: list[str] = []
         self._edit_timer: Timer | None = None
         self._saved_as: tuple[str, str] = ("", "")
+        # Clean-state snapshot for is_dirty(): (prompt hash, cases) as last loaded/saved.
+        self._baseline: tuple[str | None, list[Case]] = (None, [])
+        self._unsaved_results = False
 
     # -- layout ---------------------------------------------------------
     def compose(self) -> ComposeResult:
@@ -103,6 +106,7 @@ class StudioPane(StudioPersistMixin, Widget):
     def on_mount(self) -> None:
         self.refresh_models()
         self.history.push(self._prompt_or_none() or PromptVersion(template=DEFAULT_TEMPLATE))
+        self._mark_clean()
 
     def on_descendant_focus(self, event: events.DescendantFocus) -> None:
         # When our tab is hidden, Textual hands focus to a still-"visible" sibling inside
@@ -374,5 +378,6 @@ class StudioPane(StudioPersistMixin, Widget):
                              style="dim"))
             return
         self._entries[r.case_name] = entry
+        self._unsaved_results = True
         self._set_label(idx, self._label(self.cases[idx]))
         self._write(format_result(r, entry.model))

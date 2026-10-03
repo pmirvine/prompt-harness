@@ -147,4 +147,7 @@ class RunsPane(Widget):
             return
         self.refresh_table()
         self.notify(f"Re-test finished: run #{new.id} ({ref})")
-        self.app.push_screen(MatrixScreen.from_runs([new]), lambda _=None: self.refresh_table())
+        # Show the original run beside the re-test so Compare includes both.
+        original = (self.db.get_run(run.id) if run.id is not None else None) or run
+        self.app.push_screen(MatrixScreen.from_runs([original, new]),
+                             lambda _=None: self.refresh_table())
