@@ -61,3 +61,12 @@ async def test_client_error_propagates():
     with pytest.raises(ClientError):
         await _run(c)
     assert len(c.calls) == 1
+
+
+async def test_output_surrounding_whitespace_is_trimmed_for_the_judge():
+    # Reasoning models often emit leading blank lines; a real judge model hung
+    # on "Output:\n\n\nParis" but answered promptly for "Output:\nParis".
+    c = FakeClient(['{"pass": true, "reason": "ok"}'])
+    await run_judge(c, P, "m", "Be polite", "hi", "\n\n  hello there \n")
+    user = c.calls[0]["messages"][1]["content"]
+    assert user.endswith("Output:\nhello there")

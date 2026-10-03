@@ -54,6 +54,24 @@ def _map_error(exc: Exception) -> ClientError:
 NO_KEY = "not-needed"
 
 
+def _truncation_warnings(choice, message, content, usage) -> list[str]:
+    """Explain output cut off by the token limit, notably reasoning models whose
+    hidden reasoning consumes the whole budget and leaves an empty answer."""
+    if getattr(choice, "finish_reason", None) != "length":
+        return []
+    used = getattr(usage, "completion_tokens", None)
+    spent = f" after {used} completion tokens" if used is not None else ""
+    reasoning = getattr(message, "reasoning_content", None) or getattr(
+        message, "reasoning", None
+    )
+    if not content and reasoning:
+        return [
+            f"empty answer: the model used its token limit{spent} on reasoning "
+            "before answering; raise max_tokens"
+        ]
+    return [f"truncated: output hit the token limit{spent}; raise max_tokens"]
+
+
 def _make_client(provider: Provider) -> AsyncOpenAI:
     if not provider.api_key_env:
         key = NO_KEY
@@ -158,8 +176,11 @@ class OpenAIChatClient:
                 raise _map_error(exc) from exc
         latency_ms = int((time.perf_counter() - start) * 1000)
 
-        content = resp.choices[0].message.content if resp.choices else None
+        choice = resp.choices[0] if resp.choices else None
+        message = getattr(choice, "message", None)
+        content = getattr(message, "content", None)
         usage = getattr(resp, "usage", None)
+        warnings.extend(_truncation_warnings(choice, message, content, usage))
         try:
             response = resp.model_dump()
         except Exception:

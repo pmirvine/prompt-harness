@@ -49,7 +49,7 @@ async def run_judge(
         {
             "role": "user",
             "content": (
-                f"Criteria:\n{judge_prompt}\n\nInput:\n{case_input}\n\nOutput:\n{output}"
+                f"Criteria:\n{judge_prompt}\n\nInput:\n{case_input}\n\nOutput:\n{output.strip()}"
             ),
         },
     ]

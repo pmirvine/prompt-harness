@@ -21,12 +21,16 @@ def _status_err(cls, code: int, msg: str = "boom"):
     return cls(msg, response=httpx.Response(code, request=_req()), body=None)
 
 
-def _completion(content="hello", usage=(3, 5)):
+def _completion(content="hello", usage=(3, 5), finish_reason=None, reasoning=None):
     msg = SimpleNamespace(content=content)
+    if reasoning is not None:
+        msg.reasoning_content = reasoning
     u = SimpleNamespace(prompt_tokens=usage[0], completion_tokens=usage[1]) if usage else None
     data = {"choices": [{"message": {"content": content}}]}
     return SimpleNamespace(
-        choices=[SimpleNamespace(message=msg)], usage=u, model_dump=lambda: data
+        choices=[SimpleNamespace(message=msg, finish_reason=finish_reason)],
+        usage=u,
+        model_dump=lambda: data,
     )
 
 
@@ -280,3 +284,36 @@ async def test_empty_api_key_env_needs_no_env_var(monkeypatch):
     FakeOpenAI.models = ["x"]
     assert await OpenAIChatClient().list_models(provider(api_key_env="")) == ["x"]
 
+
+
+PROVIDER_NOKEY = Provider(name="p", base_url="http://x/v1", api_key_env="")
+
+
+@pytest.mark.asyncio
+async def test_length_finish_reason_warns_truncated(monkeypatch):
+    monkeypatch.setattr(client_mod, "AsyncOpenAI", FakeOpenAI)
+    FakeOpenAI.script = [_completion("partial", usage=(3, 300), finish_reason="length")]
+    res = await OpenAIChatClient().chat(PROVIDER_NOKEY, "m", MSGS, PromptVersion(template="x"))
+    assert res.text == "partial"
+    assert len(res.warnings) == 1
+    assert "truncated" in res.warnings[0] and "max_tokens" in res.warnings[0]
+    assert "300" in res.warnings[0]
+
+
+@pytest.mark.asyncio
+async def test_empty_answer_with_reasoning_warns_reasoning_only(monkeypatch):
+    monkeypatch.setattr(client_mod, "AsyncOpenAI", FakeOpenAI)
+    FakeOpenAI.script = [
+        _completion("", usage=(3, 300), finish_reason="length", reasoning="Let me think...")
+    ]
+    res = await OpenAIChatClient().chat(PROVIDER_NOKEY, "m", MSGS, PromptVersion(template="x"))
+    assert res.text == ""
+    assert any("reasoning" in w and "max_tokens" in w for w in res.warnings)
+
+
+@pytest.mark.asyncio
+async def test_normal_stop_has_no_warnings(monkeypatch):
+    monkeypatch.setattr(client_mod, "AsyncOpenAI", FakeOpenAI)
+    FakeOpenAI.script = [_completion("ok", finish_reason="stop", reasoning="thinking")]
+    res = await OpenAIChatClient().chat(PROVIDER_NOKEY, "m", MSGS, PromptVersion(template="x"))
+    assert res.warnings == []
