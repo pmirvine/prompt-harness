@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from urllib.parse import urlsplit
+
 from textual import on, work
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -42,6 +44,14 @@ class ProviderForm(ModalScreen["Provider | None"]):
         env = self.query_one("#api_key_env", Input).value.strip()
         if not (name and url and env):
             self.notify("Name, base URL and API key env var name are required", severity="error")
+            return
+        parts = urlsplit(url)
+        if parts.scheme not in ("http", "https") or not parts.hostname:
+            self.notify("Base URL must start with http:// or https:// and include a host",
+                        severity="error")
+            return
+        if self.existing is None and self.app.db.get_provider(name) is not None:  # type: ignore[attr-defined]
+            self.notify(f"Provider {name!r} already exists", severity="error")
             return
         if self.existing is not None:
             result = self.existing.model_copy(update={"base_url": url, "api_key_env": env})

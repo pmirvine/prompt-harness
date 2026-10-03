@@ -292,3 +292,12 @@ def test_v1_database_migrates_to_v2(tmp_path):
         assert d.list_models("p") == ["m"]
     finally:
         d.close()
+
+
+def test_delete_provider_removes_its_models(db):
+    db.save_provider(Provider(name="p", base_url="u", api_key_env="K"))
+    db.save_models("p", ["a"])
+    db.save_models("q", ["b"])
+    db.delete_provider("p")
+    assert db.list_models("p") == []
+    assert db.list_models("q") == ["b"]

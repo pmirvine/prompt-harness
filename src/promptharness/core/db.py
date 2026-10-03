@@ -195,8 +195,9 @@ class Database:
         return [self._provider(r) for r in rows]
 
     def delete_provider(self, name: str) -> None:
-        self.conn.execute("DELETE FROM providers WHERE name=?", (name,))
-        self.conn.commit()
+        with self.conn:
+            self.conn.execute("DELETE FROM providers WHERE name=?", (name,))
+            self.conn.execute("DELETE FROM provider_models WHERE provider=?", (name,))
 
     def save_models(self, provider: str, models: list[str]) -> None:
         with self.conn:
