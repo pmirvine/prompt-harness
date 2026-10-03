@@ -130,13 +130,19 @@ class Database:
     def migrate(self) -> None:
         version = self.schema_version()
         for i in range(version, len(MIGRATIONS)):
-            self.conn.executescript("BEGIN;\n" + MIGRATIONS[i] + "\nCOMMIT;")
-            self.conn.execute(
-                "INSERT INTO meta(key, value) VALUES('schema_version', ?) "
-                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                (str(i + 1),),
+            script = (
+                "BEGIN;\n"
+                + MIGRATIONS[i]
+                + "\nINSERT INTO meta(key, value) VALUES('schema_version', '"
+                + str(i + 1)
+                + "') ON CONFLICT(key) DO UPDATE SET value=excluded.value;\nCOMMIT;"
             )
-            self.conn.commit()
+            try:
+                self.conn.executescript(script)
+            except Exception:
+                if self.conn.in_transaction:
+                    self.conn.rollback()
+                raise
 
     # -- providers ----------------------------------------------------
     def save_provider(self, p: Provider) -> None:

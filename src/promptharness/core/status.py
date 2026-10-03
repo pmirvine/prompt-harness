@@ -11,11 +11,12 @@ def final_status(
 ) -> Status:
     if error:
         return "error"
-    any_failed = any(not c.passed for c in checks)
-    if judge_error and not any_failed:
-        return "judge_error"
-    if any_failed or manual_verdict is False:
+    if any(not c.passed for c in checks) or manual_verdict is False:
         return "fail"
-    if manual_verdict is True or (checks and all(c.passed for c in checks)):
+    if manual_verdict is True:
+        return "pass"
+    if judge_error:
+        return "judge_error"
+    if bool(checks) and all(c.passed for c in checks):
         return "pass"
     return "manual"

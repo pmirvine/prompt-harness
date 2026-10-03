@@ -198,6 +198,48 @@ def test_set_manual_verdict_updates_status(db):
     assert db.set_manual_verdict(rid, None).status == "manual"
 
 
+def test_failed_migration_rolls_back_and_is_recoverable(tmp_path, monkeypatch):
+    p = tmp_path / "t.db"
+    d = Database(p)
+    old = d.schema_version()
+    d.close()
+    bad = "CREATE TABLE t1 (a TEXT);\nTHIS IS NOT SQL;"
+    monkeypatch.setattr(dbmod, "MIGRATIONS", [*MIGRATIONS, bad])
+    with pytest.raises(sqlite3.Error):
+        Database(p)
+    monkeypatch.setattr(dbmod, "MIGRATIONS", list(MIGRATIONS))
+    d = Database(p)
+    assert d.schema_version() == old
+    assert not d.conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE name='t1'"
+    ).fetchone()
+    d.close()
+    monkeypatch.setattr(
+        dbmod, "MIGRATIONS", [*MIGRATIONS, "CREATE TABLE t1 (a TEXT);"]
+    )
+    d = Database(p)
+    assert d.schema_version() == old + 1
+    d.close()
+
+
+def test_judge_error_resolved_by_manual_verdict(db):
+    r = Run(
+        harness="h",
+        prompt_hash="abc",
+        model=ModelRef(provider="p", model="m"),
+        started_at="2026-01-01T00:00:00+00:00",
+        results=[
+            CaseResult(
+                case_name="a", status="judge_error", checks=[CheckResult(name="c", passed=True)]
+            )
+        ],
+    )
+    db.save_run(r)
+    assert db.set_manual_verdict(r.results[0].id, True).status == "pass"
+    assert db.get_run(r.id).results[0].status == "pass"
+    assert db.set_manual_verdict(r.results[0].id, None).status == "judge_error"
+
+
 def _c(p):
     return CheckResult(name="c", passed=p)
 
@@ -213,6 +255,10 @@ def _c(p):
         ([_c(True)], None, False, False, "fail"),
         ([], None, False, False, "fail"),
         ([_c(False)], None, False, True, "fail"),
+        ([_c(False)], None, True, True, "fail"),
+        ([_c(True)], None, True, True, "pass"),
+        ([], None, True, True, "pass"),
+        ([], None, True, None, "judge_error"),
         ([], None, False, True, "pass"),
         ([_c(True), _c(True)], None, False, None, "pass"),
         ([], None, False, None, "manual"),
