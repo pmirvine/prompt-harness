@@ -86,7 +86,7 @@ In the TUI the same steps are: `4` then `a` to add the provider, `t` to fetch it
 
 ## API keys and environment variables
 
-PromptHarness stores only the **name** of the environment variable that holds a provider's key, never the key itself. The key is read from the environment at the moment each request is made, so export it in the shell you launch from:
+PromptHarness stores only the **name** of the environment variable that holds a provider's key, never the key itself. The key is read from the environment at the moment each request is made, so either export it in the shell you launch from or put it in a `.env` file (see [Using a `.env` file](#using-a-env-file)):
 
 | Provider   | Typical env var name  |
 |------------|-----------------------|
@@ -100,11 +100,27 @@ The env var name is whatever you enter when adding the provider; the names above
 
 ### Using a `.env` file
 
-[`.env.sample`](.env.sample) lists the base URL and key variable for OpenAI, Anthropic, Google Gemini, Amazon Bedrock, OpenRouter, Groq, Together, Mistral, xAI, DeepSeek, and local servers (LM Studio, Ollama, vLLM, llama.cpp). PromptHarness does not read `.env` files itself, so load it into your shell first:
+[`.env.sample`](.env.sample) lists the base URL and key variable for OpenAI, Anthropic, Google Gemini, Amazon Bedrock, OpenRouter, Groq, Together, Mistral, xAI, DeepSeek, and local servers (LM Studio, Ollama, vLLM, llama.cpp).
+
+PromptHarness loads a `.env` file automatically on startup, for the TUI and for every subcommand:
 
 ```sh
 cp .env.sample .env          # .env is git-ignored
 $EDITOR .env                 # replace the placeholder keys you need
+promptharness                # run from the directory containing .env
+```
+
+Variables are looked up in this order, highest priority first:
+
+1. variables already set in your shell (a `.env` never overrides them);
+2. `./.env` in the directory you run `promptharness` from (parent directories are not searched);
+3. `.env` in the PromptHarness data directory (see [Where data lives](#where-data-lives)), for keys you want available from any directory.
+
+Empty values (`KEY=`) are treated as unset, values are never printed, and a missing `.env` is not an error. If a `.env` exists but cannot be read, a one-line warning naming the file goes to stderr.
+
+Provider registration is unchanged: `promptharness provider add` still takes `--api-key-env` (the variable *name*). The `*_BASE_URL` lines in the sample are only a convenience. They are not read by PromptHarness, so to use them in `provider add`, load the file into your shell first:
+
+```sh
 set -a; source .env; set +a  # export the variables into this shell
 promptharness provider add openai --base-url "$OPENAI_BASE_URL" --api-key-env OPENAI_API_KEY
 ```

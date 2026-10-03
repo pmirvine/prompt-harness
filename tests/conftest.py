@@ -6,6 +6,13 @@ def _promptharness_home(tmp_path, monkeypatch):
     monkeypatch.setenv("PROMPTHARNESS_HOME", str(tmp_path / "ph-home"))
 
 
+@pytest.fixture(autouse=True)
+def _no_real_dotenv(monkeypatch):
+    # Keep a developer's real ./.env out of the tests; tests of the loader itself
+    # pass explicit directories or restore the real function.
+    monkeypatch.setattr("promptharness.cli.load_env", lambda: [])
+
+
 import inspect  # noqa: E402
 
 from promptharness.core.client import ChatResult  # noqa: E402

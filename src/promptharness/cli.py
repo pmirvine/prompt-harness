@@ -13,6 +13,7 @@ from promptharness.core.db import Database
 from promptharness.core.models import CaseResult, ModelRef, Provider, Run
 from promptharness.core.portable import PortableError
 from promptharness.core.runner import RunSettings, run_harness
+from promptharness.envfile import load_env
 
 app = typer.Typer(help="PromptHarness: prompt regression testing.")
 provider_app = typer.Typer(help="Manage providers.")
@@ -42,6 +43,7 @@ def _parse_ref(spec: str) -> ModelRef:
 @app.callback(invoke_without_command=True)
 def main(ctx: typer.Context) -> None:
     """Launch the TUI when no subcommand is given."""
+    load_env()
     if ctx.invoked_subcommand is None:
         from promptharness.tui.app import run_app
 
