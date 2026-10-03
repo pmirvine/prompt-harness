@@ -118,3 +118,95 @@ def test_provider_add_and_list():
     assert r.exit_code == 0, r.output
     r = runner.invoke(cli.app, ["provider", "list"])
     assert "acme" in r.output and "http://a/v1" in r.output and "ACME_KEY" in r.output
+
+
+def _two_case_harness():
+    return Harness(
+        name="h2",
+        prompt=PromptVersion(template="{{input}}"),
+        cases=[
+            Case(name="c1", input="x", expectation=Expectation(must_include=[Match(pattern="ok")])),
+            Case(name="c2", input="y", expectation=Expectation(must_include=[Match(pattern="ok")])),
+        ],
+    )
+
+
+def test_run_missing_env_var_reason_shown(setup, monkeypatch):
+    from promptharness.core.client import OpenAIChatClient
+
+    setup([])
+    monkeypatch.delenv("K", raising=False)
+    monkeypatch.setattr(cli, "client_factory", OpenAIChatClient)
+    r = runner.invoke(cli.app, ["run", "h", "--model", "p:m"])
+    assert r.exit_code == 1
+    assert "c1 × p:m: error — config: environment variable K is not set" in r.output
+
+
+def test_run_failed_check_reason_shown(setup):
+    setup(["nope"])
+    r = runner.invoke(cli.app, ["run", "h", "--model", "p:m"])
+    assert r.exit_code == 1
+    assert "c1 × p:m: fail — include:ok: pattern not found: 'ok'" in r.output
+
+
+def test_run_warning_shown(setup):
+    from promptharness.core.client import ChatResult
+
+    setup([ChatResult("ok", None, None, 0, {}, {}, warnings=["dropped param: temperature"])])
+    r = runner.invoke(cli.app, ["run", "h", "--model", "p:m"])
+    assert r.exit_code == 0, r.output
+    assert "c1 × p:m: warning: dropped param: temperature" in r.output
+
+
+def test_run_judge_used_and_reason_shown(monkeypatch):
+    db = _db()
+    db.save_provider(Provider(name="p", base_url="http://x", api_key_env="K"))
+    db.save_harness(
+        Harness(
+            name="hj",
+            prompt=PromptVersion(template="{{input}}"),
+            cases=[Case(name="c1", input="x", expectation=Expectation(judge_prompt="be nice"))],
+        )
+    )
+    db.close()
+    fake = FakeClient(["answer", '{"pass": false, "reason": "too terse"}'])
+    monkeypatch.setattr(cli, "client_factory", lambda: fake)
+    r = runner.invoke(cli.app, ["run", "hj", "--model", "p:m", "--judge", "p:judge-model"])
+    assert r.exit_code == 1, r.output
+    assert len(fake.calls) == 2
+    assert fake.calls[1]["model"] == "judge-model"
+    assert "c1 × p:m: fail — judge: too terse" in r.output
+
+
+def test_run_only_selected_case(monkeypatch):
+    db = _db()
+    db.save_provider(Provider(name="p", base_url="http://x", api_key_env="K"))
+    db.save_harness(_two_case_harness())
+    db.close()
+    fake = FakeClient(["ok"])
+    monkeypatch.setattr(cli, "client_factory", lambda: fake)
+    r = runner.invoke(cli.app, ["run", "h2", "--model", "p:m", "--case", "c2"])
+    assert r.exit_code == 0, r.output
+    assert len(fake.calls) == 1
+    assert fake.calls[0]["messages"][-1]["content"] == "y"
+    assert "c1" not in r.output
+    assert "1 pass, 0 fail, 0 error, 0 judge_error, 0 manual" in r.output
+
+
+def test_run_summary_line_counts(monkeypatch):
+    db = _db()
+    db.save_provider(Provider(name="p", base_url="http://x", api_key_env="K"))
+    db.save_harness(_two_case_harness())
+    db.close()
+
+    def by_input(provider, model, messages, params):
+        return "ok" if messages[-1]["content"] == "x" else "nope"
+
+    fake = FakeClient([by_input] * 4)
+    monkeypatch.setattr(cli, "client_factory", lambda: fake)
+    r = runner.invoke(cli.app, ["run", "h2", "--model", "p:a", "--model", "p:b"])
+    assert r.exit_code == 1, r.output
+    lines = r.output.strip().splitlines()
+    assert lines[-1] == "2 pass, 2 fail, 0 error, 0 judge_error, 0 manual"
+    assert "c2 × p:a: fail — " in r.output
+    assert "c2 × p:b: fail — " in r.output

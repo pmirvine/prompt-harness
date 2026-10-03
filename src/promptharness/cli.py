@@ -10,7 +10,7 @@ from promptharness import paths
 from promptharness.core import portable
 from promptharness.core.client import ChatClient, OpenAIChatClient
 from promptharness.core.db import Database
-from promptharness.core.models import ModelRef, Provider, Run
+from promptharness.core.models import CaseResult, ModelRef, Provider, Run
 from promptharness.core.portable import PortableError
 from promptharness.core.runner import RunSettings, run_harness
 
@@ -61,6 +61,46 @@ def format_table(runs: list[Run], case_names: list[str]) -> str:
     return "\n".join(lines)
 
 
+_STATUSES = ("pass", "fail", "error", "judge_error", "manual")
+
+
+def _detail(res: CaseResult) -> tuple[str, str | None]:
+    """Return (detail, warning-used-as-detail) explaining a non-pass result."""
+    if res.error:
+        return res.error, None
+    failed = next((c for c in res.checks if not c.passed), None)
+    if failed is not None:
+        return (f"{failed.name}: {failed.reason}" if failed.reason else failed.name), None
+    if res.status == "judge_error":
+        w = next((w for w in res.warnings if "judge" in w), None)
+        return (w or "judge unavailable"), w
+    if res.status == "manual":
+        return "no automated checks; review manually", None
+    return "", None
+
+
+def format_details(runs: list[Run], case_names: list[str]) -> str:
+    """Per-cell failure reasons and warnings, then a status summary line."""
+    lines: list[str] = []
+    counts = dict.fromkeys(_STATUSES, 0)
+    for r in runs:
+        for name in case_names:
+            res = next((x for x in r.results if x.case_name == name), None)
+            if res is None:
+                continue
+            counts[res.status] = counts.get(res.status, 0) + 1
+            label = f"{name} × {r.model}"
+            used: str | None = None
+            if res.status != "pass":
+                detail, used = _detail(res)
+                lines.append(f"{label}: {res.status}" + (f" — {detail}" if detail else ""))
+            for w in res.warnings:
+                if w is not used:
+                    lines.append(f"{label}: warning: {w}")
+    lines.append(", ".join(f"{counts[s]} {s}" for s in _STATUSES))
+    return "\n".join(lines)
+
+
 @app.command()
 def run(
     harness: str = typer.Argument(..., help="Harness name"),
@@ -98,6 +138,7 @@ def run(
         db.close()
     names = [c.name for c in h.cases if case is None or c.name == case]
     typer.echo(format_table(runs, names))
+    typer.echo(format_details(runs, names))
     if any(res.status in _FAILING for r in runs for res in r.results):
         raise typer.Exit(1)
 
