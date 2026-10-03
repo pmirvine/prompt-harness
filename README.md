@@ -6,11 +6,22 @@ You work out a prompt in a **studio** against a handful of test cases, save it a
 
 Nothing leaves your machine except requests to the provider base URLs you configure. There is no telemetry, cloud sync, account or web UI.
 
+## Features
+
+- **Studio:** edit a system prompt and a Jinja2 user template, attach test cases (inline text and/or documents), run one case or all, and step back through your prompt edits.
+- **Checks:** must-include / must-not-include (substring or regex), exact or normalized match, JSON and JSON Schema validity, an optional LLM judge on an independent model, and manual pass/fail.
+- **Harnesses:** save a prompt, its cases, expectations, accepted model and accepted outputs, then re-run it against any mix of models and providers and read a case × model matrix.
+- **Compare and re-test:** view outputs side by side against the accepted output, or copy a past run and swap the model to see if a replacement still passes.
+- **Headless:** `promptharness run` exits non-zero on failures, so it works in CI.
+- **Portable:** harnesses export to YAML or JSON so they can live in git. API keys are never stored, only the names of the environment variables that hold them.
+
 ## Install
 
 Requires Python 3.11+.
 
 ```sh
+git clone https://github.com/pmirvine/prompt-harness.git
+cd prompt-harness
 uv venv && uv pip install -e .
 ```
 
