@@ -21,21 +21,25 @@ from textual.widgets import (
     TextArea,
 )
 
-from promptharness.core.models import Case, CaseResult, Harness, ModelRef, PromptVersion, Run
+from promptharness.core.models import Case, CaseResult, Harness, ModelRef, PromptVersion
 from promptharness.core.runner import run_harness
 from promptharness.core.status import final_status
 from promptharness.tui.studio_modals import CaseForm, ConfirmModal, SaveForm, VerdictModal
 from promptharness.tui.studio_support import (
     STATUS_STYLE,
     PromptHistory,
-    _Entry,
-    _now,
+    StudioEntry,
     format_result,
+    now_iso,
+    save_accepted_run,
 )
 
 __all__ = ["PromptHistory", "StudioPane"]
 
 DEFAULT_TEMPLATE = "{{ input }}"
+HINT = ("Tab to cases: n new · x delete · enter edit · r run · R run all · v verdict · s save"
+        "  |  anywhere: ctrl+r run · ctrl+s save · alt+←/→ prompt history"
+        " (ctrl+z/y outside editors)")
 
 
 class CaseList(ListView):
@@ -60,13 +64,19 @@ class StudioPane(Widget):
     BINDINGS = [
         Binding("ctrl+z", "history_undo", "Prompt back"),
         Binding("ctrl+y", "history_redo", "Prompt fwd"),
+        # Not bound by TextArea/Input, so these also work while an editor has focus.
+        Binding("alt+left", "history_undo", "Prompt back", show=False),
+        Binding("alt+right", "history_redo", "Prompt fwd", show=False),
+        Binding("ctrl+r", "run_selected", "Run case"),
+        Binding("ctrl+s", "save", "Save harness"),
     ]
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.cases: list[Case] = []
         self.history = PromptHistory()
-        self._entries: dict[str, _Entry] = {}
+        self._entries: dict[str, StudioEntry] = {}
+        self._active_runs = 0
         self._manual_models: list[str] = []
         self._log: list[str] = []
         self._edit_timer: Timer | None = None
@@ -87,8 +97,8 @@ class StudioPane(Widget):
                 yield Label("User template (Jinja2: input, documents)")
                 yield TextArea(DEFAULT_TEMPLATE, id="template")
             with Vertical(id="studio-side"):
-                yield Label("Cases  n new · x delete · enter edit · r run · R run all · "
-                            "v verdict · s save")
+                yield Label(HINT, id="studio-hint")
+                yield Label("idle", id="studio-status")
                 yield CaseList(id="cases")
                 yield RichLog(id="output", wrap=True, markup=False)
 
@@ -99,6 +109,8 @@ class StudioPane(Widget):
     def on_descendant_focus(self, event: events.DescendantFocus) -> None:
         # When our tab is hidden, Textual hands focus to a still-"visible" sibling inside
         # this pane, which would make TabbedContent switch back to the studio. Swallow it.
+        # Consequence: programmatic callers must activate the studio tab *before* focusing
+        # a studio widget (focusing alone will not switch tabs).
         pane = next((a for a in self.ancestors if isinstance(a, TabPane)), None)
         tabs = next((a for a in self.ancestors if isinstance(a, TabbedContent)), None)
         if pane is not None and tabs is not None and tabs.active != pane.id:
@@ -128,11 +140,13 @@ class StudioPane(Widget):
         refs = [f"{p.name}:{m}" for p in self.db.list_providers() if p.enabled
                 for m in self.db.list_models(p.name)]
         refs += [m for m in self._manual_models if m not in refs]
-        for sel in self.query(Select).filter("#model, #judge"):
-            keep = sel.value
-            sel.set_options([(r, r) for r in refs])
-            if keep in refs:
-                sel.value = keep
+        # Re-populating fires Select.Changed; that is not a user change, so don't re-warn.
+        with self.prevent(Select.Changed):
+            for sel in self.query(Select).filter("#model, #judge"):
+                keep = sel.value
+                sel.set_options([(r, r) for r in refs])
+                if keep in refs:
+                    sel.value = keep
 
     def _ref(self, select_id: str) -> ModelRef | None:
         v = self.query_one(select_id, Select).value
@@ -150,14 +164,18 @@ class StudioPane(Widget):
             return
         if str(ref) not in self._manual_models:
             self._manual_models.append(str(ref))
-        self.refresh_models()
+            self.refresh_models()
         self.query_one("#model", Select).value = str(ref)
         event.input.value = ""
 
     @on(Select.Changed, "#model, #judge")
     def _check_judge(self) -> None:
-        judge = self._ref("#judge")
-        if judge is not None and judge == self._ref("#model"):
+        judge, model = self._ref("#judge"), self._ref("#model")
+        pair = (judge, model)
+        if pair == getattr(self, "_warned_pair", None):
+            return  # only warn on a real change
+        self._warned_pair = pair
+        if judge is not None and judge == model:
             self.notify("Judge model is the same as the model under test", severity="warning")
 
     # -- prompt + history ------------------------------------------------
@@ -276,7 +294,21 @@ class StudioPane(Widget):
         self.app.push_screen(CaseForm(old, taken), done)
 
     # -- running --------------------------------------------------------
+    def _busy(self) -> bool:
+        if self._active_runs:
+            self.notify("A studio run is already running; wait for it to finish",
+                        severity="warning")
+            return True
+        return False
+
+    def _set_running(self, delta: int) -> None:
+        self._active_runs = max(0, self._active_runs + delta)
+        self.query_one("#studio-status", Label).update(
+            "● running…" if self._active_runs else "idle")
+
     async def action_run_selected(self) -> None:
+        if self._busy():
+            return
         idx = self._selected_index()
         if idx is None:
             self.notify("No case selected", severity="warning")
@@ -284,6 +316,8 @@ class StudioPane(Widget):
         self._start_run([self.cases[idx]])
 
     async def action_run_all(self) -> None:
+        if self._busy():
+            return
         if not self.cases:
             self.notify("No cases to run; press n to add one", severity="warning")
             return
@@ -306,14 +340,17 @@ class StudioPane(Widget):
         harness = Harness(name="studio", prompt=prompt, cases=cases)
         for c in cases:
             self._set_label(self.cases.index(c), f"[ … ] {c.name}")
-        self.run_worker(self._run(harness, model, judge), exclusive=False, group="studio-run")
+        self._set_running(+1)
+        self.run_worker(self._run(harness, model, judge), name="studio-run",
+                        exclusive=False, group="studio-run")
 
     async def _run(self, harness: Harness, model: ModelRef, judge: ModelRef | None) -> None:
-        started = _now()
+        started = now_iso()
+        ran = {c.name: c for c in harness.cases}  # the exact Case objects that were run
 
         def on_result(r: CaseResult) -> None:
-            entry = _Entry(r, harness.prompt.hash, model, judge, started, _now(),
-                           r.status == "judge_error")
+            entry = StudioEntry(ran[r.case_name], r, harness.prompt.hash, model, judge,
+                                started, now_iso(), r.status == "judge_error")
             self._record(entry)
 
         try:
@@ -325,13 +362,21 @@ class StudioPane(Widget):
             for c in harness.cases:
                 if c in self.cases:
                     self._set_label(self.cases.index(c), self._label(c))
+        finally:
+            self._set_running(-1)
 
-    def _record(self, entry: _Entry) -> None:
+    def _record(self, entry: StudioEntry) -> None:
         r = entry.result
         idx = next((i for i, c in enumerate(self.cases) if c.name == r.case_name), None)
-        if idx is not None:
-            self._entries[r.case_name] = entry
-            self._set_label(idx, self._label(self.cases[idx]))
+        if idx is None or self.cases[idx] != entry.case:
+            # Case deleted or edited while in flight: the result no longer describes it.
+            if idx is not None:
+                self._set_label(idx, self._label(self.cases[idx]))
+            self._write(Text(f"discarded result for {r.case_name!r}: case changed during run",
+                             style="dim"))
+            return
+        self._entries[r.case_name] = entry
+        self._set_label(idx, self._label(self.cases[idx]))
         self._write(format_result(r, entry.model))
 
     # -- verdict ----------------------------------------------------------
@@ -350,7 +395,7 @@ class StudioPane(Widget):
 
         self.app.push_screen(VerdictModal(entry.result.case_name), done)
 
-    def _apply_verdict(self, entry: _Entry, verdict: bool | None) -> None:
+    def _apply_verdict(self, entry: StudioEntry, verdict: bool | None) -> None:
         r = entry.result
         if r.id is not None:
             try:
@@ -370,6 +415,8 @@ class StudioPane(Widget):
 
     # -- save -----------------------------------------------------------
     async def action_save(self) -> None:
+        if self._busy():
+            return
         try:
             self.current_prompt()
         except ValueError as e:
@@ -380,7 +427,12 @@ class StudioPane(Widget):
             if answer is None:
                 return
             name, desc = answer
-            if self.db.get_harness(name) is None:
+            try:
+                exists = self.db.get_harness(name) is not None
+            except Exception as e:  # never crash the UI
+                self.notify(f"Save failed: {type(e).__name__}: {e}", severity="error")
+                return
+            if not exists:
                 self._save(name, desc)
                 return
 
@@ -397,24 +449,20 @@ class StudioPane(Widget):
         try:
             prompt = self.current_prompt()
             model = self._ref("#model")
+            judge = self._ref("#judge")
             harness = Harness(name=name, description=description, prompt=prompt,
                               cases=list(self.cases), accepted_model=model)
-            entries = [self._entries[c.name] for c in self.cases if c.name in self._entries]
+            entries = [self._entries[c.name] for c in self.cases
+                       if c.name in self._entries and self._entries[c.name].case == c]
             fresh = [e for e in entries if model is not None and e.model == model
-                     and e.prompt_hash == prompt.hash]
+                     and e.judge == judge and e.prompt_hash == prompt.hash]
             self.db.save_harness(harness)
             self._saved_as = (name, description)
             if not fresh:
-                self.notify(f"Saved {name!r}; no results for the current prompt and model, "
+                self.notify(f"Saved {name!r}; no results for the current prompt, model and judge, "
                             "so no accepted run was stored", severity="warning")
                 return
-            run = Run(harness=name, prompt_hash=prompt.hash, model=model,
-                      judge_model=fresh[0].judge,
-                      started_at=min(e.started_at for e in fresh),
-                      finished_at=max(e.finished_at for e in fresh),
-                      results=[e.result for e in fresh])
-            run_id = self.db.save_run(run)  # assigns result ids, enabling db verdicts
-            self.db.set_accepted(name, model, run_id)
+            run_id = save_accepted_run(self.db, name, prompt.hash, model, judge, fresh)
         except Exception as e:  # never crash the UI
             self.notify(f"Save failed: {type(e).__name__}: {e}", severity="error")
             return

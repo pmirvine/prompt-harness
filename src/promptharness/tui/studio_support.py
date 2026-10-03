@@ -1,6 +1,6 @@
 """Pure helpers for the Studio pane: prompt edit history and result formatting.
 
-No Textual imports (rich only), so these are unit-testable in isolation.
+No Textual imports (rich + core only), so these are unit-testable in isolation.
 """
 
 from __future__ import annotations
@@ -10,7 +10,9 @@ from datetime import datetime, timezone
 
 from rich.text import Text
 
-from promptharness.core.models import CaseResult, ModelRef, PromptVersion
+from promptharness.core.db import Database
+from promptharness.core.models import Case, CaseResult, ModelRef, PromptVersion, Run
+from promptharness.core.status import final_status
 
 STATUS_STYLE = {"pass": "bold green", "fail": "bold red", "error": "bold red",
                 "manual": "bold yellow", "judge_error": "bold magenta"}
@@ -52,7 +54,10 @@ class PromptHistory:
 
 
 @dataclass
-class _Entry:
+class StudioEntry:
+    """A studio result plus the exact context (case, prompt, models) that produced it."""
+
+    case: Case
     result: CaseResult
     prompt_hash: str
     model: ModelRef
@@ -62,7 +67,7 @@ class _Entry:
     judge_error: bool
 
 
-def _now() -> str:
+def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
@@ -90,3 +95,44 @@ def format_result(r: CaseResult, model: ModelRef) -> Text:
     if r.manual_verdict is not None:
         t.append(f"\n  manual verdict: {'pass' if r.manual_verdict else 'fail'}", style="cyan")
     return t
+
+
+def save_accepted_run(
+    db: Database,
+    harness: str,
+    prompt_hash: str,
+    model: ModelRef,
+    judge: ModelRef | None,
+    entries: list[StudioEntry],
+) -> int:
+    """Store entries' results as a run and mark it accepted for `harness`; returns run id.
+
+    db.save_run derives the judge_error flag from status, which a pre-save manual verdict
+    has overwritten. Those results are stored as judge_error and the verdict is re-applied
+    through db.set_manual_verdict, so the flag persists and status follows final_status.
+    Result objects get their db ids, so later verdicts are written to the database.
+    """
+    run = Run(harness=harness, prompt_hash=prompt_hash, model=model, judge_model=judge,
+              started_at=min(e.started_at for e in entries),
+              finished_at=max(e.finished_at for e in entries),
+              results=[e.result for e in entries])
+    reapply: list[tuple[CaseResult, bool]] = []
+    for e in entries:
+        r = e.result
+        if e.judge_error and r.manual_verdict is not None:
+            reapply.append((r, r.manual_verdict))
+            r.status, r.manual_verdict = "judge_error", None
+    ok = False
+    try:
+        run_id = db.save_run(run)
+        ok = True
+    finally:
+        if not ok:  # restore in-memory state
+            for r, verdict in reapply:
+                r.manual_verdict = verdict
+                r.status = final_status(r.checks, r.error, True, verdict)
+    for r, verdict in reapply:
+        saved = db.set_manual_verdict(r.id, verdict)
+        r.status, r.manual_verdict = saved.status, saved.manual_verdict
+    db.set_accepted(harness, model, run_id)
+    return run_id
