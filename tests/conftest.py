@@ -41,7 +41,11 @@ class FakeClient:
             prompt_tokens=None,
             completion_tokens=None,
             latency_ms=0,
-            request={"model": model, "messages": messages, "params": params},
+            request={
+                "model": model,
+                "messages": messages,
+                "params": params.model_dump(mode="json") if hasattr(params, "model_dump") else params,
+            },
             response={},
         )
 
