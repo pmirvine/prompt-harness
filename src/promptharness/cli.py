@@ -195,7 +195,11 @@ def import_(
 def provider_add(
     name: str = typer.Argument(...),
     base_url: str = typer.Option(..., "--base-url"),
-    api_key_env: str = typer.Option(..., "--api-key-env", help="Name of env var holding the key"),
+    api_key_env: str = typer.Option(
+        "",
+        "--api-key-env",
+        help="Name of env var holding the key (omit for local servers that need none)",
+    ),
     max_tokens_param: str = typer.Option(
         "max_tokens",
         "--max-tokens-param",

@@ -208,6 +208,21 @@ async def test_edit_prefills_and_preserves_fields(tmp_path):
         assert len(db.list_providers()) == 1
 
 
+async def test_add_provider_with_empty_env_var(tmp_path):
+    db = make_db(tmp_path)
+    app = PromptHarnessApp(db=db, client=FakeClient([]))
+    async with app.run_test() as pilot:
+        await pilot.press("4", "a")
+        await pilot.pause()
+        await _fill(app, "local", "http://localhost:11434/v1", "")
+        await pilot.click("#submit")
+        await pilot.pause()
+        got = db.get_provider("local")
+        assert got is not None and got.api_key_env == ""
+        assert not app.screen.query("#submit")
+    assert app.client.calls == []
+
+
 async def test_add_provider_with_max_completion_tokens(tmp_path):
     db = make_db(tmp_path)
     app = PromptHarnessApp(db=db, client=FakeClient([]))

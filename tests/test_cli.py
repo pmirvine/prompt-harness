@@ -235,3 +235,11 @@ def test_provider_add_max_tokens_param_default_and_invalid():
     )
     assert r.exit_code == 2
     assert _db().get_provider("bad") is None
+
+
+def test_provider_add_without_api_key_env():
+    r = runner.invoke(
+        cli.app, ["provider", "add", "local", "--base-url", "http://localhost:8000/v1"]
+    )
+    assert r.exit_code == 0, r.output
+    assert _db().get_provider("local").api_key_env == ""

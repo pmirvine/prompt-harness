@@ -33,7 +33,7 @@ class ProviderForm(ModalScreen["Provider | None"]):
             yield Label("Base URL")
             yield Input(p.base_url if p else "", id="base_url",
                         placeholder="https://api.openai.com/v1")
-            yield Label("API key env var NAME (the key itself is never stored)")
+            yield Label("API key env var NAME (blank for local servers)")
             yield Input(p.api_key_env if p else "", id="api_key_env",
                         placeholder="OPENAI_API_KEY")
             yield Label("Token limit parameter")
@@ -53,8 +53,8 @@ class ProviderForm(ModalScreen["Provider | None"]):
         url = self.query_one("#base_url", Input).value.strip()
         env = self.query_one("#api_key_env", Input).value.strip()
         mtp = self.query_one("#max_tokens_param", Select).value
-        if not (name and url and env):
-            self.notify("Name, base URL and API key env var name are required", severity="error")
+        if not (name and url):
+            self.notify("Name and base URL are required", severity="error")
             return
         parts = urlsplit(url)
         if parts.scheme not in ("http", "https") or not parts.hostname:

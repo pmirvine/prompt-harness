@@ -49,13 +49,21 @@ def _map_error(exc: Exception) -> ClientError:
     return ClientError("other", str(exc))
 
 
+# Sent when a provider has no api_key_env (local servers such as vLLM or Ollama):
+# the SDK requires some key, and such servers ignore it.
+NO_KEY = "not-needed"
+
+
 def _make_client(provider: Provider) -> AsyncOpenAI:
-    try:
-        key = os.environ[provider.api_key_env]
-    except KeyError:
-        raise ClientError(
-            "config", f"environment variable {provider.api_key_env} is not set"
-        ) from None
+    if not provider.api_key_env:
+        key = NO_KEY
+    else:
+        try:
+            key = os.environ[provider.api_key_env]
+        except KeyError:
+            raise ClientError(
+                "config", f"environment variable {provider.api_key_env} is not set"
+            ) from None
     return AsyncOpenAI(
         base_url=provider.base_url,
         api_key=key,
@@ -101,11 +109,32 @@ def _rejected_param(exc: Exception, call_params: dict[str, Any]) -> str | None:
     return None
 
 
+async def _close(client: AsyncOpenAI) -> None:
+    """Release the per-call client's connections; a failed close never masks the result."""
+    try:
+        await client.close()
+    except Exception:
+        pass
+
+
 class OpenAIChatClient:
     async def chat(
         self, provider: Provider, model: str, messages: list[dict], params: PromptVersion | dict
     ) -> ChatResult:
         client = _make_client(provider)
+        try:
+            return await self._chat(client, provider, model, messages, params)
+        finally:
+            await _close(client)
+
+    async def _chat(
+        self,
+        client: AsyncOpenAI,
+        provider: Provider,
+        model: str,
+        messages: list[dict],
+        params: PromptVersion | dict,
+    ) -> ChatResult:
         call_params = _collect_params(provider, params)
         warnings: list[str] = []
         start = time.perf_counter()
@@ -156,4 +185,6 @@ class OpenAIChatClient:
             page = await client.models.list()
         except Exception as exc:
             raise _map_error(exc) from exc
+        finally:
+            await _close(client)
         return sorted(m.id for m in page.data)

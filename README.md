@@ -40,7 +40,7 @@ PromptHarness stores only the **name** of the environment variable that holds a 
 | Together   | `TOGETHER_API_KEY`    |
 | Local (vLLM, Ollama) | none required by the server |
 
-The env var name is whatever you enter when adding the provider; the names above are conventions. A provider always has an env var name configured, and requests fail with a per-case `error` ("environment variable ... is not set") if that variable is unset. For a local server that ignores auth, pick any name (for example `LOCAL_API_KEY`) and export any placeholder value (`export LOCAL_API_KEY=none`).
+The env var name is whatever you enter when adding the provider; the names above are conventions. If a provider has an env var name and that variable is unset, its requests fail with a per-case `error` ("environment variable ... is not set"). A local server such as vLLM or Ollama needs no env var: leave the name empty (omit `--api-key-env` on the CLI) and a placeholder key is sent.
 
 ## Provider setup
 
@@ -52,10 +52,10 @@ Providers are managed on the Providers tab (`4`) or with `promptharness provider
 | OpenRouter | `openrouter` | `https://openrouter.ai/api/v1`    | `OPENROUTER_API_KEY` |
 | Groq       | `groq`       | `https://api.groq.com/openai/v1`  | `GROQ_API_KEY`       |
 | Together   | `together`   | `https://api.together.xyz/v1`     | `TOGETHER_API_KEY`   |
-| vLLM (local)   | `vllm`   | `http://localhost:8000/v1`        | any name, e.g. `LOCAL_API_KEY` |
-| Ollama (local) | `ollama` | `http://localhost:11434/v1`       | any name, e.g. `LOCAL_API_KEY` |
+| vLLM (local)   | `vllm`   | `http://localhost:8000/v1`        | none (leave empty)   |
+| Ollama (local) | `ollama` | `http://localhost:11434/v1`       | none (leave empty)   |
 
-In the TUI: press `4`, then `a`, fill in Name, Base URL and the API key env var **name**, and save. Then press `t` to test the connection; on success the provider's model list is fetched and stored. If listing fails (some servers do not expose `/models`), the models editor opens so you can type model ids one per line (`m` reopens it later).
+In the TUI: press `4`, then `a`, fill in Name, Base URL and the API key env var **name** (empty for a local server), and save. Then press `t` to test the connection; on success the provider's model list is fetched and stored. If listing fails (some servers do not expose `/models`), the models editor opens so you can type model ids one per line (`m` reopens it later).
 
 From the CLI:
 
@@ -64,8 +64,8 @@ promptharness provider add openai     --base-url https://api.openai.com/v1      
 promptharness provider add openrouter --base-url https://openrouter.ai/api/v1   --api-key-env OPENROUTER_API_KEY
 promptharness provider add groq       --base-url https://api.groq.com/openai/v1 --api-key-env GROQ_API_KEY
 promptharness provider add together   --base-url https://api.together.xyz/v1    --api-key-env TOGETHER_API_KEY
-promptharness provider add vllm       --base-url http://localhost:8000/v1       --api-key-env LOCAL_API_KEY
-promptharness provider add ollama     --base-url http://localhost:11434/v1      --api-key-env LOCAL_API_KEY
+promptharness provider add vllm       --base-url http://localhost:8000/v1
+promptharness provider add ollama     --base-url http://localhost:11434/v1
 promptharness provider list
 ```
 
@@ -147,7 +147,7 @@ promptharness run NAME --model openai:gpt-4o-mini [--model groq:llama-3.3-70b-ve
     [--judge openai:gpt-4o] [--concurrency 2] [--case CASE_NAME]
 promptharness export NAME [--format yaml|json] [--inline-documents] [--out FILE]
 promptharness import FILE [--overwrite]
-promptharness provider add NAME --base-url URL --api-key-env VAR
+promptharness provider add NAME --base-url URL [--api-key-env VAR]
 promptharness provider list
 ```
 

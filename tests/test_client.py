@@ -38,6 +38,7 @@ class FakeOpenAI:
 
     def __init__(self, **kwargs):
         self.init_kwargs = kwargs
+        self.closed = False
         FakeOpenAI.instances.append(self)
 
         async def create(**kw):
@@ -55,6 +56,15 @@ class FakeOpenAI:
 
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=create))
         self.models = SimpleNamespace(list=list_)
+
+    async def close(self):
+        self.closed = True
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        await self.close()
 
 
 @pytest.fixture(autouse=True)
@@ -232,3 +242,41 @@ async def test_repeat_rejection_of_dropped_param_raises():
         await OpenAIChatClient().chat(provider(), "m", MSGS, pv)
     assert ei.value.kind == "other"
     assert len(FakeOpenAI.calls) == 2
+
+
+async def test_client_closed_after_success():
+    await OpenAIChatClient().chat(provider(), "m", MSGS, {})
+    assert [i.closed for i in FakeOpenAI.instances] == [True]
+
+
+async def test_client_closed_after_error():
+    FakeOpenAI.script = [_status_err(openai.InternalServerError, 500)]
+    with pytest.raises(ClientError):
+        await OpenAIChatClient().chat(provider(), "m", MSGS, {})
+    assert [i.closed for i in FakeOpenAI.instances] == [True]
+
+
+async def test_client_closed_after_param_drop_failure():
+    FakeOpenAI.script = [_bad("'temperature' bad"), _bad("'temperature' bad")]
+    with pytest.raises(ClientError):
+        await OpenAIChatClient().chat(provider(), "m", MSGS, {"temperature": 1})
+    assert [i.closed for i in FakeOpenAI.instances] == [True]
+
+
+async def test_list_models_closes_client_on_success_and_error():
+    FakeOpenAI.models = ["a"]
+    await OpenAIChatClient().list_models(provider())
+    FakeOpenAI.models = _status_err(openai.AuthenticationError, 401)
+    with pytest.raises(ClientError):
+        await OpenAIChatClient().list_models(provider())
+    assert [i.closed for i in FakeOpenAI.instances] == [True, True]
+
+
+async def test_empty_api_key_env_needs_no_env_var(monkeypatch):
+    monkeypatch.delenv("TEST_KEY", raising=False)
+    r = await OpenAIChatClient().chat(provider(api_key_env=""), "m", MSGS, {})
+    assert r.text == "hello"
+    assert FakeOpenAI.instances[0].init_kwargs["api_key"] == "not-needed"
+    FakeOpenAI.models = ["x"]
+    assert await OpenAIChatClient().list_models(provider(api_key_env="")) == ["x"]
+
