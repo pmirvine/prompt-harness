@@ -41,3 +41,9 @@ RegressionForm, ExportForm, ImportForm { align: center middle; }
 #matrix { height: 1fr; }
 #detail-scroll { height: 1fr; padding: 0 1; }
 #form.compact Label { margin-top: 0; }
+#compare-title { color: #7fd1b9; text-style: bold; padding: 0 1; }
+#compare-panes { height: 1fr; }
+.compare-pane { width: 1fr; height: 1fr; border: round #4a5568; padding: 0 1; }
+.compare-pane:focus { border: round #7fd1b9; }
+.compare-head { margin-bottom: 1; }
+RetestForm { align: center middle; }

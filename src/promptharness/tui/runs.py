@@ -1,4 +1,5 @@
-"""Runs pane: history of stored runs with status counts; open one or several read-only."""
+"""Runs pane: history of stored runs with status counts; open one or several read-only,
+or re-test a run on a replacement model."""
 
 from __future__ import annotations
 
@@ -11,8 +12,10 @@ from textual.binding import Binding
 from textual.widget import Widget
 from textual.widgets import DataTable
 
-from promptharness.core.models import Run
+from promptharness.core.models import ModelRef, Run
+from promptharness.core.retest import prompt_changed, retest
 from promptharness.tui.matrix import MatrixScreen
+from promptharness.tui.retest_modal import RetestForm
 
 __all__ = ["RunsPane"]
 
@@ -30,6 +33,7 @@ class RunsPane(Widget):
     BINDINGS = [
         Binding("enter", "open", "Open run(s)"),
         Binding("space", "mark", "Mark for side-by-side"),
+        Binding("r", "retest", "Re-test on model"),
     ]
 
     def __init__(self, **kwargs) -> None:
@@ -103,4 +107,44 @@ class RunsPane(Widget):
             self.notify("No run selected", severity="warning")
             return
         runs.sort(key=lambda r: (r.started_at, r.id or 0))
-        self.app.push_screen(MatrixScreen.from_runs(runs))
+        # Verdicts can be set on stored runs: refresh the counts when the matrix closes.
+        self.app.push_screen(MatrixScreen.from_runs(runs), lambda _=None: self.refresh_table())
+
+    # -- re-test on replacement -------------------------------------------
+    def _model_options(self) -> list[str]:
+        return [f"{p.name}:{m}" for p in self.db.list_providers() if p.enabled
+                for m in self.db.list_models(p.name)]
+
+    def action_retest(self) -> None:
+        rid = self._selected_id()
+        run = self._runs.get(rid) if rid is not None else None
+        if run is None:
+            self.notify("No run selected", severity="warning")
+            return
+        try:
+            options = self._model_options()
+        except Exception as e:  # never crash: manual entry still works
+            options = []
+            self.notify(f"Could not load models: {e}", severity="error")
+
+        def chosen(ref: ModelRef | None) -> None:
+            if ref is not None:
+                self.run_worker(self._retest(run, ref), name="retest", group="retest")
+
+        self.app.push_screen(RetestForm(run, options), chosen)
+
+    async def _retest(self, run: Run, ref: ModelRef) -> None:
+        self.notify(f"Re-testing {run.harness!r} on {ref}…")
+        try:
+            if prompt_changed(self.db, run):
+                self.notify("Note: harness prompt changed since the original run; "
+                            "the re-test uses the current prompt", severity="warning")
+            providers = {p.name: p for p in self.db.list_providers()}
+            new = await retest(self.db, run, ref, providers,
+                               self.app.client)  # type: ignore[attr-defined]
+        except Exception as e:  # never crash the UI
+            self.notify(f"Re-test failed: {e}", severity="error")
+            return
+        self.refresh_table()
+        self.notify(f"Re-test finished: run #{new.id} ({ref})")
+        self.app.push_screen(MatrixScreen.from_runs([new]), lambda _=None: self.refresh_table())

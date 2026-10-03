@@ -29,6 +29,7 @@ from promptharness.core.models import (
 from promptharness.tui.app import PromptHarnessApp
 from promptharness.tui.matrix import MatrixScreen, ResultDetail
 from promptharness.tui.studio import StudioPane
+from promptharness.tui.studio_modals import VerdictModal
 
 
 def make_db(tmp_path) -> Database:
@@ -564,9 +565,12 @@ async def test_runs_pane_lists_runs_after_regression(tmp_path):
         assert screen.query_one("#matrix", DataTable).row_count == 2
         screen.open_detail("c1", screen.column_keys[0])
         await pilot.pause()
-        await pilot.press("v")
+        await pilot.press("v")  # stored results accept verdicts even read-only
         await pilot.pause()
-        assert isinstance(app.screen, ResultDetail)  # verdict disabled read-only
+        assert isinstance(app.screen, VerdictModal)
+        await pilot.press("escape")  # cancel: nothing changes
+        await pilot.pause()
+        assert isinstance(app.screen, ResultDetail)
         await pilot.press("escape", "escape")
         await pilot.pause()
         assert app.query_one(TabbedContent).active == "runs"
