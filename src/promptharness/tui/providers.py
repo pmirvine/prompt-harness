@@ -8,10 +8,13 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widget import Widget
-from textual.widgets import Button, DataTable, Input, Label, TextArea
+from textual.widgets import Button, DataTable, Input, Label, Select, TextArea
 
 from promptharness.core.client import ClientError
 from promptharness.core.models import Provider
+
+
+MAX_TOKENS_PARAMS = ("max_tokens", "max_completion_tokens")
 
 
 class ProviderForm(ModalScreen["Provider | None"]):
@@ -23,7 +26,7 @@ class ProviderForm(ModalScreen["Provider | None"]):
 
     def compose(self) -> ComposeResult:
         p = self.existing
-        with Vertical(id="form"):
+        with Vertical(id="form", classes="compact"):
             yield Label("Edit provider" if p else "Add provider")
             yield Label("Name")
             yield Input(p.name if p else "", id="name", disabled=p is not None)
@@ -33,6 +36,13 @@ class ProviderForm(ModalScreen["Provider | None"]):
             yield Label("API key env var NAME (the key itself is never stored)")
             yield Input(p.api_key_env if p else "", id="api_key_env",
                         placeholder="OPENAI_API_KEY")
+            yield Label("Token limit parameter")
+            yield Select(
+                [(v, v) for v in MAX_TOKENS_PARAMS],
+                value=p.max_tokens_param if p else "max_tokens",
+                allow_blank=False,
+                id="max_tokens_param",
+            )
             with Horizontal(id="buttons"):
                 yield Button("Save", id="submit", variant="primary")
                 yield Button("Cancel", id="cancel")
@@ -42,6 +52,7 @@ class ProviderForm(ModalScreen["Provider | None"]):
         name = self.query_one("#name", Input).value.strip()
         url = self.query_one("#base_url", Input).value.strip()
         env = self.query_one("#api_key_env", Input).value.strip()
+        mtp = self.query_one("#max_tokens_param", Select).value
         if not (name and url and env):
             self.notify("Name, base URL and API key env var name are required", severity="error")
             return
@@ -54,9 +65,12 @@ class ProviderForm(ModalScreen["Provider | None"]):
             self.notify(f"Provider {name!r} already exists", severity="error")
             return
         if self.existing is not None:
-            result = self.existing.model_copy(update={"base_url": url, "api_key_env": env})
+            result = self.existing.model_copy(
+                update={"base_url": url, "api_key_env": env, "max_tokens_param": mtp}
+            )
         else:
-            result = Provider(name=name, base_url=url, api_key_env=env)
+            result = Provider(name=name, base_url=url, api_key_env=env,
+                              max_tokens_param=mtp)  # type: ignore[arg-type]
         self.dismiss(result)
 
     @on(Button.Pressed, "#cancel")

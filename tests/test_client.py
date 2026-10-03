@@ -180,3 +180,55 @@ async def test_list_models_failure_is_client_error():
     with pytest.raises(ClientError) as ei:
         await OpenAIChatClient().list_models(provider())
     assert ei.value.kind == "auth"
+
+
+def _bad(msg: str, param: str | None = None):
+    exc = _status_err(openai.BadRequestError, 400, msg)
+    if param is not None:
+        exc.param = param
+    return exc
+
+
+async def test_two_params_dropped_in_turn():
+    FakeOpenAI.script = [
+        _bad("Unsupported value: 'temperature' does not support 0.7"),
+        _bad("Unsupported parameter: 'max_tokens' is not supported with this model"),
+        _completion("ok"),
+    ]
+    pv = PromptVersion(template="t", temperature=0.7, max_tokens=10)
+    r = await OpenAIChatClient().chat(provider(), "m", MSGS, pv)
+    assert r.text == "ok"
+    assert r.warnings == ["dropped param: temperature", "dropped param: max_tokens"]
+    assert len(FakeOpenAI.calls) == 3
+    assert "temperature" not in FakeOpenAI.calls[2]
+    assert "max_tokens" not in FakeOpenAI.calls[2]
+
+
+async def test_param_attribute_preferred():
+    FakeOpenAI.script = [_bad("this value is not supported", param="top_p"), _completion("ok")]
+    pv = PromptVersion(template="t", temperature=0.7, extra_params={"top_p": 0.5})
+    r = await OpenAIChatClient().chat(provider(), "m", MSGS, pv)
+    assert r.warnings == ["dropped param: top_p"]
+    assert "top_p" not in FakeOpenAI.calls[1]
+    assert FakeOpenAI.calls[1]["temperature"] == 0.7
+
+
+async def test_short_key_not_matched_by_substring():
+    FakeOpenAI.script = [_bad("invalid request: unknown model name")]
+    pv = PromptVersion(template="t", extra_params={"n": 2})
+    with pytest.raises(ClientError) as ei:
+        await OpenAIChatClient().chat(provider(), "m", MSGS, pv)
+    assert ei.value.kind == "other"
+    assert len(FakeOpenAI.calls) == 1
+
+
+async def test_repeat_rejection_of_dropped_param_raises():
+    FakeOpenAI.script = [
+        _bad("Unsupported value: 'temperature'"),
+        _bad("Unsupported value: 'temperature'"),
+    ]
+    pv = PromptVersion(template="t", temperature=0.7, max_tokens=10)
+    with pytest.raises(ClientError) as ei:
+        await OpenAIChatClient().chat(provider(), "m", MSGS, pv)
+    assert ei.value.kind == "other"
+    assert len(FakeOpenAI.calls) == 2

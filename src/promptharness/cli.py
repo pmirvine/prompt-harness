@@ -21,6 +21,7 @@ app.add_typer(provider_app, name="provider")
 client_factory: Callable[[], ChatClient] = OpenAIChatClient
 
 _FAILING = {"fail", "error", "judge_error"}
+_MAX_TOKENS_PARAMS = ("max_tokens", "max_completion_tokens")
 
 
 def _usage_error(msg: str) -> typer.Exit:
@@ -195,11 +196,28 @@ def provider_add(
     name: str = typer.Argument(...),
     base_url: str = typer.Option(..., "--base-url"),
     api_key_env: str = typer.Option(..., "--api-key-env", help="Name of env var holding the key"),
+    max_tokens_param: str = typer.Option(
+        "max_tokens",
+        "--max-tokens-param",
+        help="Request field for the token limit: max_tokens or max_completion_tokens",
+    ),
 ) -> None:
     """Add or update a provider (the key itself is never stored)."""
+    if max_tokens_param not in _MAX_TOKENS_PARAMS:
+        raise _usage_error(
+            f"invalid --max-tokens-param {max_tokens_param!r} "
+            f"(expected {' or '.join(_MAX_TOKENS_PARAMS)})"
+        )
     db = Database(paths.db_path())
     try:
-        db.save_provider(Provider(name=name, base_url=base_url, api_key_env=api_key_env))
+        db.save_provider(
+            Provider(
+                name=name,
+                base_url=base_url,
+                api_key_env=api_key_env,
+                max_tokens_param=max_tokens_param,  # type: ignore[arg-type]
+            )
+        )
     finally:
         db.close()
     typer.echo(f"Saved provider {name}")

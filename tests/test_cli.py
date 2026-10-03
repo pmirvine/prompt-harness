@@ -210,3 +210,28 @@ def test_run_summary_line_counts(monkeypatch):
     assert lines[-1] == "2 pass, 2 fail, 0 error, 0 judge_error, 0 manual"
     assert "c2 × p:a: fail — " in r.output
     assert "c2 × p:b: fail — " in r.output
+
+
+def test_provider_add_max_tokens_param():
+    r = runner.invoke(
+        cli.app,
+        ["provider", "add", "acme", "--base-url", "http://a/v1", "--api-key-env", "K",
+         "--max-tokens-param", "max_completion_tokens"],
+    )
+    assert r.exit_code == 0, r.output
+    assert _db().get_provider("acme").max_tokens_param == "max_completion_tokens"
+
+
+def test_provider_add_max_tokens_param_default_and_invalid():
+    r = runner.invoke(
+        cli.app, ["provider", "add", "acme", "--base-url", "http://a/v1", "--api-key-env", "K"]
+    )
+    assert r.exit_code == 0, r.output
+    assert _db().get_provider("acme").max_tokens_param == "max_tokens"
+    r = runner.invoke(
+        cli.app,
+        ["provider", "add", "bad", "--base-url", "http://a/v1", "--api-key-env", "K",
+         "--max-tokens-param", "tokens"],
+    )
+    assert r.exit_code == 2
+    assert _db().get_provider("bad") is None

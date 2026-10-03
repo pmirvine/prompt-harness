@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
@@ -83,6 +84,23 @@ def _collect_params(provider: Provider, params: PromptVersion | dict) -> dict[st
     return out
 
 
+def _rejected_param(exc: Exception, call_params: dict[str, Any]) -> str | None:
+    """Identify which call parameter a 400 error rejects, or None.
+
+    Prefers the SDK's ``param`` attribute; otherwise looks for the key quoted
+    ('key' or "key") in the message, so short keys like ``n`` never match by
+    accident.
+    """
+    param = getattr(exc, "param", None)
+    if isinstance(param, str) and param in call_params:
+        return param
+    msg = str(exc)
+    for k in call_params:
+        if re.search(rf"""['"]{re.escape(k)}['"]""", msg):
+            return k
+    return None
+
+
 class OpenAIChatClient:
     async def chat(
         self, provider: Provider, model: str, messages: list[dict], params: PromptVersion | dict
@@ -91,7 +109,7 @@ class OpenAIChatClient:
         call_params = _collect_params(provider, params)
         warnings: list[str] = []
         start = time.perf_counter()
-        dropped_once = False
+        dropped: set[str] = set()
         while True:
             try:
                 resp = await client.chat.completions.create(
@@ -99,11 +117,10 @@ class OpenAIChatClient:
                 )
                 break
             except openai.BadRequestError as exc:
-                msg = str(exc)
-                culprit = next((k for k in call_params if k in msg), None)
-                if culprit is None or dropped_once:
+                culprit = _rejected_param(exc, call_params)
+                if culprit is None or culprit in dropped:
                     raise _map_error(exc) from exc
-                dropped_once = True
+                dropped.add(culprit)
                 del call_params[culprit]
                 warnings.append(f"dropped param: {culprit}")
             except ClientError:

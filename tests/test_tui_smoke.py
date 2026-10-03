@@ -208,6 +208,38 @@ async def test_edit_prefills_and_preserves_fields(tmp_path):
         assert len(db.list_providers()) == 1
 
 
+async def test_add_provider_with_max_completion_tokens(tmp_path):
+    db = make_db(tmp_path)
+    app = PromptHarnessApp(db=db, client=FakeClient([]))
+    async with app.run_test() as pilot:
+        await pilot.press("4", "a")
+        await pilot.pause()
+        await _fill(app, "acme", "https://a.test", "K")
+        sel = app.screen.query_one("#max_tokens_param", Select)
+        assert sel.value == "max_tokens"
+        sel.value = "max_completion_tokens"
+        await pilot.click("#submit")
+        await pilot.pause()
+        assert db.get_provider("acme").max_tokens_param == "max_completion_tokens"
+    assert app.client.calls == []
+
+
+async def test_edit_prefills_max_tokens_param(tmp_path):
+    db = make_db(tmp_path)
+    db.save_provider(Provider(name="acme", base_url="https://a.test", api_key_env="K1",
+                              max_tokens_param="max_completion_tokens"))
+    app = PromptHarnessApp(db=db, client=FakeClient([]))
+    async with app.run_test() as pilot:
+        await pilot.press("4", "e")
+        await pilot.pause()
+        sel = app.screen.query_one("#max_tokens_param", Select)
+        assert sel.value == "max_completion_tokens"
+        sel.value = "max_tokens"
+        await pilot.click("#submit")
+        await pilot.pause()
+        assert db.get_provider("acme").max_tokens_param == "max_tokens"
+
+
 async def test_cancel_leaves_db_unchanged(tmp_path):
     db = make_db(tmp_path)
     app = PromptHarnessApp(db=db, client=FakeClient([]))
