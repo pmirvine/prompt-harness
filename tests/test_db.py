@@ -266,3 +266,29 @@ def _c(p):
 )
 def test_final_status_table(checks, error, judge_error, verdict, expected):
     assert final_status(checks, error, judge_error, verdict) == expected
+
+
+def test_models_roundtrip_in_db(db):
+    assert db.list_models("p") == []
+    db.save_models("p", ["b", "a", "a"])
+    db.save_models("q", ["z"])
+    assert db.list_models("p") == ["a", "b"]
+    db.save_models("p", ["c"])
+    assert db.list_models("p") == ["c"]
+    assert db.list_models("q") == ["z"]
+
+
+def test_v1_database_migrates_to_v2(tmp_path):
+    path = tmp_path / "v1.db"
+    conn = sqlite3.connect(str(path))
+    conn.executescript(MIGRATIONS[0])
+    conn.execute("INSERT INTO meta(key, value) VALUES('schema_version', '1')")
+    conn.commit()
+    conn.close()
+    d = Database(path)
+    try:
+        assert d.schema_version() == len(MIGRATIONS) >= 2
+        d.save_models("p", ["m"])
+        assert d.list_models("p") == ["m"]
+    finally:
+        d.close()

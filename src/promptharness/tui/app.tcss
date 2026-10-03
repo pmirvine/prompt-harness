@@ -1,0 +1,16 @@
+Screen { background: #101216; color: #d0d4dc; }
+TabbedContent { height: 1fr; }
+TabPane { padding: 0 1; }
+Tabs { background: #181b22; }
+Tab.-active { color: #7fd1b9; text-style: bold; }
+DataTable { height: 1fr; background: #101216; }
+DataTable > .datatable--header { background: #1c2028; text-style: bold; }
+DataTable > .datatable--cursor { background: #2a3a4a; }
+Footer { background: #181b22; }
+ProvidersPane { height: 1fr; }
+ProviderForm, ModelsForm { align: center middle; }
+#form { width: 64; height: auto; padding: 1 2; border: round #4a5568; background: #181b22; }
+#form Label { margin-top: 1; color: #8a93a3; }
+#form TextArea { height: 8; }
+#buttons { height: auto; margin-top: 1; }
+#buttons Button { margin-right: 2; }

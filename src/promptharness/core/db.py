@@ -88,6 +88,13 @@ MIGRATIONS: list[str] = [
         manual_verdict INTEGER
     );
     """,
+    """
+    CREATE TABLE provider_models (
+        provider TEXT NOT NULL,
+        model TEXT NOT NULL,
+        PRIMARY KEY (provider, model)
+    );
+    """,
 ]
 
 
@@ -190,6 +197,20 @@ class Database:
     def delete_provider(self, name: str) -> None:
         self.conn.execute("DELETE FROM providers WHERE name=?", (name,))
         self.conn.commit()
+
+    def save_models(self, provider: str, models: list[str]) -> None:
+        with self.conn:
+            self.conn.execute("DELETE FROM provider_models WHERE provider=?", (provider,))
+            self.conn.executemany(
+                "INSERT OR IGNORE INTO provider_models(provider, model) VALUES(?,?)",
+                [(provider, m) for m in models],
+            )
+
+    def list_models(self, provider: str) -> list[str]:
+        rows = self.conn.execute(
+            "SELECT model FROM provider_models WHERE provider=? ORDER BY model", (provider,)
+        ).fetchall()
+        return [r[0] for r in rows]
 
     # -- harnesses ----------------------------------------------------
     def save_harness(self, h: Harness) -> None:
