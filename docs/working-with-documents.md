@@ -65,15 +65,15 @@ The real answer:
 ```
 Based on the details you provided:
 
-- **Total amount owed:** 200.00 EUR
-- **Due date for the first (and only) invoice:** December 1, 2026
+* **Amount owed:** €200.00 (for Invoice 1043 from Cobalt GmbH)
+* **Due date:** December 1, 2026
 
-If you have additional invoices or need help tracking multiple payments, just share them and I'll calculate the totals and due dates for you!
+*(Note: You mentioned "these invoices" in plural, but only one was included. If you have additional invoices to add to this total, just share them and I'll calculate the combined amount for you!)*
 ```
 
 The model says there is only one invoice. The line under the result header, `documents: invoice-1041.docx (text) · invoice-1042.pdf (text, 1 page) · invoice-1043.png (image)`, shows that all three documents were loaded, so what went wrong?
 
-**The template decides what the model sees.** PromptHarness reads the Word file and the PDF as text, but text only reaches the model if the template puts it into the prompt. The template is just `{{ input }}`, so the model got the question and nothing else. Images are the exception: an image document is always attached to the request, which is why the model found the 200.00 EUR invoice. (Another run of this same prompt said "Since only one invoice is provided here"; same mistake, different words.)
+**The template decides what the model sees.** PromptHarness reads the Word file and the PDF as text, but text only reaches the model if the template puts it into the prompt. The template is just `{{ input }}`, so the model got the question and nothing else. Images are the exception: an image document is always attached to the request, which is why the model found the 200.00 EUR invoice. (Other runs of this same prompt made the same mistake in different words, for example "Since only one invoice is provided here".)
 
 The case shows `[MANUAL]` because it has no checks yet, so nothing decides pass or fail automatically.
 
@@ -96,13 +96,12 @@ The template sees the case's documents as a list called `documents`, in the orde
 
 ![The improved template and its answer: the right total, but in prose](screenshots/documents-guide/03-documents-in-template.png)
 
-The real answer (30 seconds):
+The real answer (21 seconds):
 
 ```
-Based on the three invoices provided:
+You owe a total of **400.50 EUR** on these invoices.
 
-- **Total amount owed:** €400.50 (€120.00 + €80.50 + €200.00)
-- **First due date:** November 1, 2026 (for Invoice 1041 from ACME Supplies)
+The first invoice is due on **November 1, 2026** (Invoice 1041 from ACME Supplies).
 ```
 
 The facts are right now. But the answer is prose with Markdown, the date is written out in words, and the next run may phrase it differently. That is fine for a person and awkward for a program, and impossible to check reliably. Let's ask for a fixed format.
@@ -123,7 +122,7 @@ The facts are right now. But the answer is prose with Markdown, the date is writ
 
 ![The JSON system prompt and its answer](screenshots/documents-guide/04-json-answer.png)
 
-The real answer (42 seconds):
+The real answer (36 seconds):
 
 ```
 {"total": 400.5, "earliest_due": "2026-11-01"}
@@ -160,7 +159,7 @@ That is exactly what we want. (Bonsai puts two blank lines before its answers; J
 
 ![The checks section of the case form](screenshots/documents-guide/05-checks.png)
 
-Press `r` to run it again. Every check passes (21 seconds):
+Press `r` to run it again. Every check passes (16 seconds):
 
 ![The result with all four checks passing](screenshots/documents-guide/06-checks-pass.png)
 
@@ -181,19 +180,20 @@ The Studio keeps a history of your prompt versions: a version is recorded each t
 
 ![The previous prompt run against the checks: the total is there, but three checks fail](screenshots/documents-guide/07-history-back.png)
 
-The real result (24 seconds):
+The real result (19 seconds):
 
 ```
-You owe a total of **400.50 EUR** on these invoices (120.00 + 80.50 + 200.00).
+Based on the invoices provided:
 
-The first invoice to be paid is **Invoice 1041**, which is due on **November 1, 2026**.
+* **Total amount owed:** `400.50 EUR` (200.00 + 120.00 + 80.50)
+* **First due date:** `November 1, 2026` (Invoice 1041 from ACME Supplies)
   ✓ include:400.5
   ✗ include:2026-11-01: pattern not found: '2026-11-01'
   ✗ json: output is not valid JSON: Expecting value: line 1 column 1 (char 0)
   ✗ json_schema: output is not valid JSON: Expecting value: line 1 column 1 (char 0)
 ```
 
-The answer is correct for a human, but the checks show exactly why it is not good enough for a program. Press `ctrl+y` to return to the JSON prompt, and `r` to confirm it still passes (it did, in 46 seconds).
+The answer is correct for a human, but the checks show exactly why it is not good enough for a program. Press `ctrl+y` to return to the JSON prompt, and `r` to confirm it still passes (it did, in 42 seconds).
 
 ## 8. Choose your own name for the documents
 
@@ -222,7 +222,7 @@ Nothing is sent to the model: the template cannot be filled in, so the case stop
    {% endfor %}
    ```
 
-4. Press `ctrl+r`. It passes again (55 seconds).
+4. Press `ctrl+r`. It passes again (43 seconds).
 
 ## 9. Add a judge
 
@@ -245,7 +245,7 @@ Checks are good at exact facts. For a criterion that needs judgement, add a *jud
 
 ![All checks and the judge pass](screenshots/documents-guide/10-judge-pass.png)
 
-The real result (48 seconds for the answer, plus the judge):
+The real result (39 seconds for the answer, plus the judge):
 
 ```
 {"total": 400.5, "earliest_due": "2026-11-01"}
@@ -276,7 +276,7 @@ The harness keeps the prompt (including the `doc` name), the case with its docum
 
 ![The regression dialog with both models ticked and gemma as the judge](screenshots/documents-guide/12-regression.png)
 
-Both models pass (bonsai in 43 seconds, gemma in 23):
+Both models pass (bonsai in 58 seconds, gemma in 22):
 
 ![The regression grid: one case, two models, both pass](screenshots/documents-guide/13-matrix.png)
 
@@ -284,7 +284,7 @@ Press `c` on the case to compare the answers side by side. The first column is t
 
 ![The Compare view: the accepted answer, bonsai and gemma](screenshots/documents-guide/14-compare.png)
 
-The answers are identical; the differences are in speed and tokens. Gemma did not "think" first, so it used fewer output tokens (370 against 1331 and 1488 here) and does not start with blank lines. Press `Esc` twice to go back.
+The answers are identical; the differences are in speed and tokens. Gemma did not "think" first, so it used far fewer output tokens (336 against 1959 for bonsai in this run, and 1274 in the run you saved) and does not start with blank lines. Press `Esc` twice to go back.
 
 ## 12. Export it to share
 
@@ -337,6 +337,6 @@ error: unsupported: /path/to/prompt-harness/docs/sample-documents/invoice-1044.p
 
 Edit the case (`Enter`) and fix the path. Other cases in the same run carry on.
 
-**`error: timeout: Request timed out.`** By default PromptHarness waits 60 seconds for an answer, and tries twice more before giving up, so the timeout error only surfaces after the retries, about three minutes in. Bonsai usually took 13 to 55 seconds per answer in these runs, because it reasons before answering, and once took 63 seconds (that run had a longer limit, set for making these screenshots). So bonsai can go over the limit even on a fast machine, more so on a slower one or while the model is still loading; when only one attempt is too slow, the retry may still succeed and you just wait longer. To give a slow model more time, raise the provider's timeout: `promptharness provider add lmstudio --timeout 300` (only the options you pass change), or on the Providers tab press `e` on the provider and fill in **Timeout (s)**; **Max retries** sets how many times a failed request is tried again (blank keeps the defaults of 60 seconds and 2 retries). Besides that you can: run the case again once the model is loaded and warm; use a smaller model, or one that answers without thinking first (gemma took 19 to 27 seconds here); or shorten the prompt and the documents, since long inputs take longer to read.
+**`error: timeout: Request timed out.`** By default PromptHarness waits 60 seconds for an answer, and tries twice more before giving up, so the timeout error only surfaces after the retries, about three minutes in. Bonsai usually took 13 to 58 seconds per answer in these runs, because it reasons before answering, and once took 63 seconds (that run had a longer limit, set for making these screenshots). So bonsai can go over the limit even on a fast machine, more so on a slower one or while the model is still loading; when only one attempt is too slow, the retry may still succeed and you just wait longer. To give a slow model more time, raise the provider's timeout: `promptharness provider add lmstudio --timeout 300` (only the options you pass change), or on the Providers tab press `e` on the provider and fill in **Timeout (s)**; **Max retries** sets how many times a failed request is tried again (blank keeps the defaults of 60 seconds and 2 retries). Besides that you can: run the case again once the model is loaded and warm; use a smaller model, or one that answers without thinking first (gemma took 19 to 27 seconds here); or shorten the prompt and the documents, since long inputs take longer to read.
 
 For empty answers, missing API keys and other general problems, see [Troubleshooting](getting-started.md#troubleshooting) in the getting-started guide, and the [Documents](../README.md#documents) section of the README for every supported format and limit.
