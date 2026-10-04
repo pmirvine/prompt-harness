@@ -34,6 +34,11 @@ class Provider(BaseModel):
     max_retries: int | None = None
 
 
+_RESERVED_DOCUMENTS_NAMES = frozenset(
+    {"input", "output", "self", "true", "false", "none", "loop", "caller"}
+)
+
+
 class PromptVersion(BaseModel):
     system: str = ""
     template: str
@@ -49,8 +54,11 @@ class PromptVersion(BaseModel):
             raise ValueError(
                 f"documents_name must be a valid Python identifier and not a keyword: {v!r}"
             )
-        if v in ("input", "output"):
-            raise ValueError(f"documents_name must not be 'input' or 'output': {v!r}")
+        if v in _RESERVED_DOCUMENTS_NAMES:
+            raise ValueError(
+                f"documents_name must not be a reserved template name "
+                f"({', '.join(sorted(_RESERVED_DOCUMENTS_NAMES))}): {v!r}"
+            )
         return v
 
     @property

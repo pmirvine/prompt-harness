@@ -73,5 +73,10 @@ def test_render_with_custom_name():
     assert render_user("{{ doc[0].text }}", "hi", docs, documents_name="doc") == "A"
     with pytest.raises(TemplateRenderError, match="doc"):
         render_user("{{ doc[0].text }}", "hi", docs)
-    with pytest.raises(TemplateRenderError):
+    with pytest.raises(TemplateRenderError, match="documents"):
         render_user("{{ documents[0].text }}", "hi", docs, documents_name="doc")
+
+
+def test_render_passes_variables_as_dict():
+    docs = [Document(name="a.txt", text="A")]
+    assert render_user("{{ input }}{{ files[0].text }}", "hi", docs, "files") == "hiA"

@@ -25,7 +25,8 @@ def test_documents_name_valid(name):
     assert PromptVersion(template="x", documents_name=name).documents_name == name
 
 
-@pytest.mark.parametrize("name", ["1x", "a-b", "class", "input", "output", "", "a b"])
+@pytest.mark.parametrize("name", ["1x", "a-b", "class", "input", "output", "", "a b",
+                                  "self", "true", "false", "none", "loop", "caller"])
 def test_documents_name_validation(name):
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match="documents_name"):
         PromptVersion(template="x", documents_name=name)

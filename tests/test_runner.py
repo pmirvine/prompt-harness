@@ -300,4 +300,4 @@ async def test_runner_uses_the_configured_name(tmp_path):
     bad = PromptVersion(template="{{ documents[0].text }}", documents_name="doc")
     r, _ = await ev(c, ["out"], prompt=bad)
     assert r.status == "error"
-    assert "undefined" in r.error
+    assert "'documents' is undefined" in r.error

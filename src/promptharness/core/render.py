@@ -17,7 +17,7 @@ def render_user(
 ) -> str:
     env = SandboxedEnvironment(undefined=StrictUndefined)
     try:
-        return env.from_string(template).render(**{"input": input, documents_name: documents})
+        return env.from_string(template).render({"input": input, documents_name: documents})
     except TemplateError as e:
         raise TemplateRenderError(str(e)) from e
     except Exception as e:  # sandbox security errors, attribute errors in templates
