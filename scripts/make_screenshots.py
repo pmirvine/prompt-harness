@@ -153,13 +153,13 @@ def seed(db):
     asyncio.run(go())
 
 
-def save(app, name: str) -> None:
-    OUT.mkdir(parents=True, exist_ok=True)
-    svg = OUT / f"{name}.svg"
+def save(app, name: str, out: Path = OUT) -> None:
+    out.mkdir(parents=True, exist_ok=True)
+    svg = out / f"{name}.svg"
     svg.write_text(app.export_screenshot(title="PromptHarness"), encoding="utf-8")
     if shutil.which("rsvg-convert"):
         subprocess.run(
-            ["rsvg-convert", "--zoom", "2", "-o", str(OUT / f"{name}.png"), str(svg)], check=True
+            ["rsvg-convert", "--zoom", "2", "-o", str(out / f"{name}.png"), str(svg)], check=True
         )
         svg.unlink()  # the PNG is what the README uses; keep the SVG only if it can't be converted
     print("wrote", name)

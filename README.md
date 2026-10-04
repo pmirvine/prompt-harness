@@ -6,6 +6,8 @@ You work out a prompt in a **studio** against a handful of test cases, save it a
 
 Nothing leaves your machine except requests to the provider base URLs you configure. There is no telemetry, cloud sync, account or web UI.
 
+**New here? Follow the [Getting started guide](docs/getting-started.md)** for a step-by-step walk-through of your first test run, with screenshots.
+
 ## Features
 
 - **Studio:** edit a system prompt and a Jinja2 user template, attach test cases (inline text and/or documents), run one case or all, and step back through your prompt edits.
@@ -331,3 +333,9 @@ uv run python scripts/make_screenshots.py
 ```
 
 The script drives the real screens headlessly with Textual's test pilot, using a temporary data directory and recorded model outputs, so it needs no network, API keys or running model server.
+
+The screenshots for the [Getting started guide](docs/getting-started.md) are different: `scripts/make_getting_started_screenshots.py` runs the whole first-run flow against a real model server, so it needs one running:
+
+```sh
+uv run python scripts/make_getting_started_screenshots.py --base-url http://localhost:1234/v1 --model your-model-id
+```
