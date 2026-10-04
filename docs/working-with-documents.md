@@ -56,7 +56,7 @@ A *case* is one test: an input, any documents, and later the checks that decide 
 
 ## 3. Run the vague prompt
 
-With the case selected in the list, press `r` to run it. Bonsai is a model that thinks before it answers, so a run takes between about 15 and 55 seconds here; the status line above the case list says `● running…` until it is done.
+With the case selected in the list, press `r` to run it. Bonsai is a model that thinks before it answers, so a run takes between about 15 seconds and a minute here; the status line above the case list says `● running…` until it is done.
 
 ![The Studio after the first run: the model only saw the image](screenshots/documents-guide/02-vague-result.png)
 
@@ -321,7 +321,13 @@ error: unsupported: /path/to/scan.pdf: no extractable text; it may be a scan. Co
 
 If only some pages are blank, the case runs and the result shows a warning such as `scan.pdf: page 2 has no extractable text`.
 
-**The template uses the wrong name.** `error: 'documents' is undefined` (or `'doc' is undefined`) means the template, or the judge prompt, uses a different name from the **Docs as** field. Make them match; an empty **Docs as** means `documents`.
+**The template uses the wrong name.** `error: 'documents' is undefined` (or `'doc' is undefined`) means the template uses a different name from the **Docs as** field, and the case stops before anything is sent to the model. Make them match; an empty **Docs as** means `documents`.
+
+The judge prompt follows the same name, but a mistake there shows up differently: the model still answers and the checks still run, then the case ends with `JUDGE_ERROR` and a warning instead of an error. For example, a judge prompt that uses `{{ doc[0].name }}` while **Docs as** is empty gives:
+
+```
+! warning: judge: judge prompt template error: 'doc' is undefined
+```
 
 **A document path does not exist.** A typo in a path, or launching from a different folder when the paths are relative, stops that case and names the full path it tried:
 
@@ -331,6 +337,6 @@ error: unsupported: /path/to/prompt-harness/docs/sample-documents/invoice-1044.p
 
 Edit the case (`Enter`) and fix the path. Other cases in the same run carry on.
 
-**`error — timeout`.** PromptHarness waits 60 seconds for each request. Bonsai took up to 55 seconds per answer in these runs, because it reasons before answering, so a slower machine, or a model that is still loading, can go over. Run it again once the model is loaded, or use a model that answers without thinking first (gemma took 19 to 27 seconds here).
+**`error: timeout: Request timed out.`** PromptHarness waits 60 seconds for an answer, and tries twice more before giving up, so this error appears after about three minutes. Bonsai usually took 13 to 55 seconds per answer in these runs, because it reasons before answering, and once took 63 seconds (that run had a longer limit, set for making these screenshots). So bonsai can go over the limit even on a fast machine, more so on a slower one or while the model is still loading; when only one attempt is too slow, the retry may still succeed and you just wait longer. The 60 second limit cannot be changed from the app yet (neither the provider form nor the command line has a setting for it). Instead you can: run the case again once the model is loaded and warm; use a smaller model, or one that answers without thinking first (gemma took 19 to 27 seconds here); or shorten the prompt and the documents, since long inputs take longer to read.
 
 For empty answers, missing API keys and other general problems, see [Troubleshooting](getting-started.md#troubleshooting) in the getting-started guide, and the [Documents](../README.md#documents) section of the README for every supported format and limit.

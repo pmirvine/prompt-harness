@@ -23,6 +23,7 @@ import asyncio
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import urllib.request
@@ -31,11 +32,25 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from make_screenshots import save  # noqa: E402
+from make_screenshots import save as _save_png  # noqa: E402
 
 OUT = ROOT / "docs" / "screenshots" / "documents-guide"
 WIDTH = 125
 BASE_HEIGHT = 46  # the Studio shots use this height too, so the output log never re-wraps
+SHOTS = (
+    "01-case-form", "02-vague-result", "03-documents-in-template", "04-json-answer",
+    "05-checks", "06-checks-pass", "07-history-back", "08-wrong-name", "09-judge-prompt",
+    "10-judge-pass", "11-save", "12-regression", "13-matrix", "14-compare", "15-export",
+)
+
+
+def save(app, name: str, out: Path) -> None:
+    """Write the PNG, then shrink it to a 64-colour palette when ImageMagick is installed."""
+    _save_png(app, name, out)
+    png = out / f"{name}.png"
+    if png.exists() and shutil.which("magick"):
+        subprocess.run(["magick", str(png), "+dither", "-colors", "64", "-strip", str(png)],
+                       check=True)
 
 # The text the guide tells the reader to type, kept in one place.
 CASE_NAME = "invoices"
@@ -115,11 +130,14 @@ async def _drive(app, *, args, only, remaining, export_dir) -> None:
             await app.workers.wait_for_complete()
             await pilot.pause()
 
-        async def shot(name: str, height: int):
+        async def shot(name: str, height: int, after_resize=None):
             if only is not None and name not in only:
                 return  # the flow still runs; only the requested images are rewritten
             await pilot.resize_terminal(WIDTH, height)
             await pilot.pause()
+            if after_resize is not None:  # scroll positions must be set at the final size
+                after_resize()
+                await pilot.pause()
             if app.screen is app.default_screen:
                 studio.query_one("#output").scroll_end(animate=False)  # newest result
                 await pilot.pause()
@@ -205,9 +223,8 @@ async def _drive(app, *, args, only, remaining, export_dir) -> None:
         await pilot.pause()
         form = q("#case-form")
         label = form.children[form.children.index(q("#must-include")) - 1]  # "Must include"
-        form.scroll_to_widget(label, animate=False, top=True)
-        await pilot.pause()
-        await shot("05-checks", 44)
+        await shot("05-checks", 44,
+                   after_resize=lambda: form.scroll_to_widget(label, animate=False, top=True))
         q("#case-submit", Button).press()
         await settle()
         await run_case("r")
@@ -239,9 +256,8 @@ async def _drive(app, *, args, only, remaining, export_dir) -> None:
         await edit_case()
         q("#judge-prompt", TextArea).text = JUDGE_PROMPT
         await pilot.pause()
-        q("#case-form").scroll_end(animate=False)
-        await pilot.pause()
-        await shot("09-judge-prompt", 34)
+        await shot("09-judge-prompt", 34,
+                   after_resize=lambda: q("#case-form").scroll_end(animate=False))
         q("#case-submit", Button).press()
         await settle()
         await choose("#judge", second)
@@ -323,13 +339,18 @@ def main() -> int:
     )
     ap.add_argument("--keep-export", help="also copy the exported YAML file to this path")
     args = ap.parse_args()
+    only = set(args.only.split(",")) if args.only else None
+    unknown = sorted(only - set(SHOTS)) if only else []
+    if unknown:
+        ap.error(f"unknown screenshot name(s): {', '.join(unknown)}; choose from {', '.join(SHOTS)}")
+    if args.keep_export:
+        args.keep_export = Path(args.keep_export).resolve()  # before the chdir below
 
     tmp = tempfile.mkdtemp(prefix="promptharness-docs-")
     os.environ["PROMPTHARNESS_HOME"] = tmp
     cwd = os.getcwd()
     os.chdir(ROOT)  # the guide types the sample paths relative to a clone of the repository
     try:
-        only = set(args.only.split(",")) if args.only else None
         export_dir = Path(tmp) / "export"
         export_dir.mkdir()
         asyncio.run(flow(Path(tmp) / "docs.db", export_dir, args, only))
