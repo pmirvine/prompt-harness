@@ -3,7 +3,7 @@ from __future__ import annotations
 import importlib
 import os
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
@@ -30,7 +30,7 @@ class Document:
     pages: int | None = None
     warnings: tuple[str, ...] = ()
     # Underscore-prefixed so the Jinja sandbox cannot read it.
-    _data: bytes | None = None
+    _data: bytes | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)
@@ -75,25 +75,33 @@ def _load_optional_readers() -> None:
                 raise
 
 
+def _too_large(path: str, size: int) -> str:
+    return (
+        f"unsupported: {path}: image too large ({size} bytes, "
+        f"limit {MAX_IMAGE_BYTES // (1024 * 1024)} MB)"
+    )
+
+
 def read_document(path: str, index: int = 0) -> Document:
     _load_optional_readers()
+    name = os.path.basename(path)
+    ext = os.path.splitext(name)[1].lower()
     try:
+        if ext in IMAGE_EXTENSIONS:
+            size = os.stat(path).st_size
+            if size > MAX_IMAGE_BYTES:
+                raise DocumentError(_too_large(path, size))
         with open(path, "rb") as f:
             data = f.read()
     except OSError as e:
         raise DocumentError(f"unsupported: {path}: cannot read ({e.strerror or e})") from e
-    name = os.path.basename(path)
-    ext = os.path.splitext(name)[1].lower()
 
     if ext in IMAGE_EXTENSIONS:
         mime = sniff_image(data)
         if mime is None:
             raise DocumentError(f"unsupported: {path}: not a valid image")
         if len(data) > MAX_IMAGE_BYTES:
-            raise DocumentError(
-                f"unsupported: {path}: image too large ({len(data)} bytes, "
-                f"limit {MAX_IMAGE_BYTES // (1024 * 1024)} MB)"
-            )
+            raise DocumentError(_too_large(path, len(data)))
         return Document(
             name=name,
             text=f"[attached image: {name}]",

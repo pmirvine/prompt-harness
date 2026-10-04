@@ -134,3 +134,62 @@ def test_template_cannot_read_image_bytes(tmp_path):
         "{{ documents[0].kind }} {{ documents[0].mime }} {{ documents[0].index }}", "", docs
     )
     assert out == "image image/png 0"
+
+
+def test_image_repr_omits_bytes(tmp_path):
+    p = tmp_path / "a.png"
+    p.write_bytes(PNG + b"Z" * 5000)
+    d = read_document(str(p))
+    assert len(repr(d)) < 500
+    assert "ZZZZ" not in repr(d)
+
+
+def test_oversize_image_rejected_before_reading(tmp_path, monkeypatch):
+    monkeypatch.setattr(documents, "MAX_IMAGE_BYTES", 10)
+    p = tmp_path / "big.png"
+    p.write_bytes(PNG)
+
+    def no_open(*a, **k):
+        raise AssertionError("file must not be read")
+
+    monkeypatch.setattr(documents, "open", no_open, raising=False)
+    with pytest.raises(DocumentError, match="image too large"):
+        read_document(str(p))
+
+
+def test_missing_image_still_cannot_read(tmp_path):
+    with pytest.raises(DocumentError, match="cannot read"):
+        read_document(str(tmp_path / "nope.png"))
+
+
+def test_image_size_boundary(tmp_path, monkeypatch):
+    monkeypatch.setattr(documents, "MAX_IMAGE_BYTES", len(PNG))
+    ok = tmp_path / "ok.png"
+    ok.write_bytes(PNG)
+    assert read_document(str(ok)).kind == "image"
+    big = tmp_path / "big.png"
+    big.write_bytes(PNG + b"\x00")
+    with pytest.raises(DocumentError, match="image too large"):
+        read_document(str(big))
+
+
+def test_uppercase_extension(tmp_path):
+    p = tmp_path / "A.PNG"
+    p.write_bytes(PNG)
+    d = read_document(str(p))
+    assert d.kind == "image" and d.mime == "image/png"
+
+
+def test_optional_reader_import_errors(monkeypatch):
+    def absent(name):
+        raise ModuleNotFoundError(f"No module named {name!r}", name=name)
+
+    monkeypatch.setattr(documents.importlib, "import_module", absent)
+    documents._load_optional_readers()  # absent modules are tolerated
+
+    def inner(name):
+        raise ModuleNotFoundError("No module named 'docx'", name="docx")
+
+    monkeypatch.setattr(documents.importlib, "import_module", inner)
+    with pytest.raises(ImportError):
+        documents._load_optional_readers()
