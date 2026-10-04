@@ -115,7 +115,13 @@ SAMPLES = ROOT / "docs" / "sample-documents"
 EXAMPLES_DIR = ROOT / "src" / "promptharness" / "examples"
 DOC_EXAMPLES = ["three-documents", "mixed-formats"]
 GOOD_JSON = '{"total": 400.5, "earliest_due": "2026-11-01"}'
-BAD_JSON = ['{"total": 300.0, "earliest_due": "2026-11-01"}', '{"total": 400.5, "earliest_due": "2026-11-15"}']
+GOOD_JSON_ALT = ['{"total": 400.50, "earliest_due": "2026-11-01"}']
+BAD_JSON = [
+    '{"total": 300.0, "earliest_due": "2026-11-01"}',
+    '{"total": 400.5, "earliest_due": "2026-11-15"}',
+    '{"total": 400.55, "earliest_due": "2026-11-01"}',
+    '{"total": 1400.5, "earliest_due": "2026-11-01"}',
+]
 
 
 def _import(db, name):
@@ -266,3 +272,11 @@ def test_three_documents_cli_import_restores_three_files_without_prefixes(monkey
     judge_text = json.dumps(fake.calls[0]["messages"])
     assert all(n in judge_text for n in names)
     assert not re.search(r"\d_invoice-", judge_text)
+
+
+@pytest.mark.parametrize("example", DOC_EXAMPLES)
+@pytest.mark.parametrize("good", [GOOD_JSON, *GOOD_JSON_ALT])
+def test_total_check_accepts_both_spellings(example, good):
+    harness, _ = parse_harness(read_example(example))
+    res = run_checks(good, _case(harness, "total-and-due-date").expectation)
+    assert res and all(r.passed for r in res), res

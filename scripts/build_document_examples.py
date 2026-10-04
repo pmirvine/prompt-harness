@@ -58,7 +58,7 @@ TOTAL_EXPECTATION = Expectation(
     },
     must_include=[
         Match(pattern=r'"earliest_due"\s*:\s*"2026-11-01"', regex=True),
-        Match(pattern=r"400\.5", regex=True),
+        Match(pattern=r"(?<![\d.])400\.50?(?!\d)", regex=True),
     ],
 )
 SYSTEM = "You are a precise assistant. Answer exactly as asked, using only the documents provided."
