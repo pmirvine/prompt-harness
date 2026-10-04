@@ -85,15 +85,13 @@ def test_pdf_encrypted_without_cryptography(tmp_path, monkeypatch):
 
 def test_docx_paragraphs_and_table_in_order(tmp_path):
     data = docfixtures.make_docx(
-        ["Invoice 1041", "Total follows"], table=[["Item", "Price"], ["Widget", "9.00"]]
+        [], blocks=["Before table", [["Item", "Price"], ["Widget", "9.00"]], "After table"]
     )
     d = _load(tmp_path, "a.docx", data)
-    lines = d.text.splitlines()
-    idx = [
-        next(i for i, line in enumerate(lines) if s in line)
-        for s in ("Invoice 1041", "Total follows", "Item | Price", "Widget | 9.00")
-    ]
-    assert idx == sorted(idx)
+    t = d.text
+    assert "Item | Price" in t and "Widget | 9.00" in t
+    assert t.index("Before table") < t.index("Item | Price") < t.index("Widget | 9.00")
+    assert t.index("Widget | 9.00") < t.index("After table")
     assert d.mime == DOCX_MIME
 
 
@@ -121,3 +119,8 @@ def test_pptx_slides_tables_and_notes(tmp_path):
     assert d.text.index("Intro") < d.text.index("--- slide 2 ---") < d.text.index("Pricing")
     assert d.pages == 2
     assert d.mime == PPTX_MIME
+
+
+def test_pptx_reads_text_inside_group_shapes(tmp_path):
+    data = docfixtures.make_pptx([{"title": "T", "body": "B", "group_text": "Grouped words"}])
+    assert "Grouped words" in _load(tmp_path, "a.pptx", data).text

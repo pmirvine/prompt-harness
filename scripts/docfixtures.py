@@ -41,17 +41,25 @@ def make_pdf(pages: list[str]) -> bytes:
     return bytes(out)
 
 
-def make_docx(paragraphs: list[str], table: list[list[str]] | None = None) -> bytes:
+def make_docx(
+    paragraphs: list[str],
+    table: list[list[str]] | None = None,
+    blocks: list[str | list[list[str]]] | None = None,
+) -> bytes:
+    """Build a .docx. `blocks` (str = paragraph, list of rows = table, in order) wins."""
     import docx
 
+    if blocks is None:
+        blocks = [*paragraphs, *([table] if table else [])]
     doc = docx.Document()
-    for p in paragraphs:
-        doc.add_paragraph(p)
-    if table:
-        t = doc.add_table(rows=len(table), cols=len(table[0]))
-        for r, row in enumerate(table):
-            for c, cell in enumerate(row):
-                t.cell(r, c).text = cell
+    for b in blocks:
+        if isinstance(b, str):
+            doc.add_paragraph(b)
+        else:
+            t = doc.add_table(rows=len(b), cols=len(b[0]))
+            for r, row in enumerate(b):
+                for c, cell in enumerate(row):
+                    t.cell(r, c).text = cell
     buf = io.BytesIO()
     doc.save(buf)
     return buf.getvalue()
@@ -74,6 +82,11 @@ def make_pptx(slides: list[dict]) -> bytes:
             for r, row in enumerate(rows):
                 for c, cell in enumerate(row):
                     shape.table.cell(r, c).text = cell
+        if s.get("group_text"):
+            grp = slide.shapes.add_group_shape()
+            grp.shapes.add_textbox(Inches(1), Inches(6.5), Inches(4), Inches(0.5)).text_frame.text = (
+                s["group_text"]
+            )
         if s.get("notes"):
             slide.notes_slide.notes_text_frame.text = s["notes"]
     buf = io.BytesIO()

@@ -61,6 +61,16 @@ def read_docx(data: bytes, name: str) -> ReadResult:
     return ReadResult(text="\n".join(lines), mime=DOCX_MIME)
 
 
+def _walk_shapes(shapes):
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+    for shape in shapes:
+        if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+            yield from _walk_shapes(shape.shapes)
+        else:
+            yield shape
+
+
 @register(".pptx")
 def read_pptx(data: bytes, name: str) -> ReadResult:
     if not zipfile.is_zipfile(io.BytesIO(data)):
@@ -76,7 +86,7 @@ def read_pptx(data: bytes, name: str) -> ReadResult:
     for n, slide in enumerate(prs.slides, 1):
         count = n
         out.append(f"--- slide {n} ---")
-        for shape in slide.shapes:
+        for shape in _walk_shapes(slide.shapes):
             if shape.has_text_frame and shape.text_frame.text.strip():
                 out.append(shape.text_frame.text.strip())
             elif getattr(shape, "has_table", False) and shape.has_table:
