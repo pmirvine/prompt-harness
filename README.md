@@ -392,7 +392,7 @@ A document problem never stops a run: the case that uses the document ends with 
 
 ### Sharing harnesses with documents
 
-`promptharness export NAME --inline-documents` embeds each case's documents in the file, binary ones included (each file at most 10 MB), and importing the file restores them under the data directory. See [Export and import](#export-and-import).
+`promptharness export NAME --inline-documents` embeds each case's documents in the file, binary ones included (each file at most 10 MB), and importing the file restores them under the data directory. It embeds the contents of every listed file, including the target of a symlink, so review the file before you share it. See [Export and import](#export-and-import).
 
 ### Examples
 
@@ -457,7 +457,7 @@ promptharness run summarize-example --model openai:gpt-4o-mini
 
 ## Where data lives
 
-Everything (providers, harnesses, runs, imported documents) is in one SQLite database, `promptharness.db`, in your platform's user data directory (via `platformdirs`; for example `~/Library/Application Support/promptharness` on macOS and `~/.local/share/promptharness` on Linux). Set `PROMPTHARNESS_HOME` to use a different directory, for a separate set of data or for throwaway experiments:
+Providers, harnesses and runs are in one SQLite database, `promptharness.db`, in your platform's user data directory (via `platformdirs`; for example `~/Library/Application Support/promptharness` on macOS and `~/.local/share/promptharness` on Linux). Documents restored by an import are files under `<data dir>/documents/<harness name>/`; the database only holds their paths. Set `PROMPTHARNESS_HOME` to use a different directory, for a separate set of data or for throwaway experiments:
 
 ```sh
 PROMPTHARNESS_HOME=/tmp/ph-scratch promptharness
