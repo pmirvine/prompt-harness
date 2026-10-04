@@ -90,7 +90,16 @@ async def _evaluate(
         jprov, jmodel = judge
         try:
             checks.append(
-                await run_judge(client, jprov, jmodel, exp.judge_prompt, case.input, chat.text)
+                await run_judge(
+                    client,
+                    jprov,
+                    jmodel,
+                    exp.judge_prompt,
+                    case.input,
+                    chat.text,
+                    docs,
+                    prompt.documents_name,
+                )
             )
         except JudgeError as e:
             judge_error = True

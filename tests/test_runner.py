@@ -420,3 +420,22 @@ async def test_stored_run_has_no_base64(tmp_path):
         db.close()
     assert "bytes omitted" in text
     _no_b64_payload(text)
+
+
+async def test_judge_receives_the_case_documents(tmp_path):
+    f = tmp_path / "d.txt"
+    f.write_text("DOCBODY")
+    c = Case(
+        name="c", input="hi", documents=[str(f)], expectation=Expectation(judge_prompt="good?")
+    )
+    r, client = await ev(c, ["out", '{"pass": true, "reason": "ok"}'], judge=(PROV, "j"))
+    assert r.status == "pass"
+    assert "DOCBODY" in client.calls[1]["messages"][-1]["content"]
+
+
+async def test_judge_template_error_gives_judge_error_status():
+    c = case(judge_prompt="{{ nope }}")
+    r, client = await ev(c, ["out"], judge=(PROV, "j"))
+    assert r.status == "judge_error"
+    assert any("judge prompt template error" in w for w in r.warnings)
+    assert len(client.calls) == 1
