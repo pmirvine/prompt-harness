@@ -95,6 +95,9 @@ MIGRATIONS: list[str] = [
         PRIMARY KEY (provider, model)
     );
     """,
+    """
+    ALTER TABLE prompt_versions ADD COLUMN documents_name TEXT NOT NULL DEFAULT 'documents';
+    """,
 ]
 
 
@@ -219,9 +222,9 @@ class Database:
         with self.conn:
             self.conn.execute(
                 "INSERT OR IGNORE INTO prompt_versions(hash, system, template, temperature,"
-                " max_tokens, extra_params) VALUES(?,?,?,?,?,?)",
+                " max_tokens, extra_params, documents_name) VALUES(?,?,?,?,?,?,?)",
                 (pv.hash, pv.system, pv.template, pv.temperature, pv.max_tokens,
-                 _j(pv.extra_params)),
+                 _j(pv.extra_params), pv.documents_name),
             )
             am = h.accepted_model
             self.conn.execute(
@@ -260,6 +263,7 @@ class Database:
                 temperature=pv["temperature"],
                 max_tokens=pv["max_tokens"],
                 extra_params=json.loads(pv["extra_params"]),
+                documents_name=pv["documents_name"],
             ),
             cases=[
                 Case(

@@ -243,3 +243,28 @@ def test_example_harness_imports(db):
     h = import_harness(db, EXAMPLE_TEXT)
     assert h.accepted_run_id is not None
     assert len(h.cases) == 2
+
+
+def test_export_omits_default_name_and_includes_custom(db):
+    import yaml
+
+    base = Harness(
+        name="h", prompt=PromptVersion(template="{{ input }}"),
+        cases=[Case(name="a", input="x")],
+    )
+    db.save_harness(base)
+    text = export_harness(db, "h")
+    assert "documents_name" not in yaml.safe_load(text)["prompt"]
+    assert parse_harness(text)[0].prompt.documents_name == "documents"
+
+    custom = base.model_copy(
+        update={
+            "name": "c",
+            "prompt": PromptVersion(template="{{ doc }}", documents_name="doc"),
+        }
+    )
+    db.save_harness(custom)
+    text = export_harness(db, "c")
+    assert yaml.safe_load(text)["prompt"]["documents_name"] == "doc"
+    assert parse_harness(text)[0].prompt.documents_name == "doc"
+    assert "documents_name" in export_harness(db, "c", "json")

@@ -287,3 +287,17 @@ async def test_unknown_only_case_raises():
     with pytest.raises(ValueError, match="unknown case 'zz'"):
         await run_harness(h, ModelRef(provider="p", model="m"), {"p": PROV}, client, only_case="zz")
     assert client.calls == []
+
+
+@pytest.mark.asyncio
+async def test_runner_uses_the_configured_name(tmp_path):
+    f = tmp_path / "d.txt"
+    f.write_text("DOCBODY")
+    c = Case(name="c", input="hi", documents=[str(f)])
+    ok = PromptVersion(template="{{ doc[0].text }}", documents_name="doc")
+    r, client = await ev(c, ["out"], prompt=ok)
+    assert "DOCBODY" in client.calls[0]["messages"][-1]["content"]
+    bad = PromptVersion(template="{{ documents[0].text }}", documents_name="doc")
+    r, _ = await ev(c, ["out"], prompt=bad)
+    assert r.status == "error"
+    assert "undefined" in r.error

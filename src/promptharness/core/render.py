@@ -12,10 +12,12 @@ class TemplateRenderError(Exception):
     pass
 
 
-def render_user(template: str, input: str, documents: list[Document]) -> str:
+def render_user(
+    template: str, input: str, documents: list[Document], documents_name: str = "documents"
+) -> str:
     env = SandboxedEnvironment(undefined=StrictUndefined)
     try:
-        return env.from_string(template).render(input=input, documents=documents)
+        return env.from_string(template).render(**{"input": input, documents_name: documents})
     except TemplateError as e:
         raise TemplateRenderError(str(e)) from e
     except Exception as e:  # sandbox security errors, attribute errors in templates

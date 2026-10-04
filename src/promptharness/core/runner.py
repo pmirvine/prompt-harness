@@ -59,7 +59,7 @@ async def _evaluate(
     judge: tuple[Provider, str] | None,
 ) -> CaseResult:
     docs = load_documents(case.documents)
-    user = render_user(prompt.template, case.input, docs)
+    user = render_user(prompt.template, case.input, docs, prompt.documents_name)
     messages: list[dict] = []
     if prompt.system:
         messages.append({"role": "system", "content": prompt.system})

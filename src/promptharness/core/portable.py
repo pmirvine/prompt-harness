@@ -36,6 +36,8 @@ def export_harness(
         raise PortableError(f"harness '{name}' not found")
     data: dict[str, Any] = {"format_version": FORMAT_VERSION}
     body = h.model_dump(mode="json", exclude={"accepted_model", "accepted_run_id"})
+    if body["prompt"].get("documents_name") == "documents":
+        del body["prompt"]["documents_name"]
     data.update(body)
     if inline_documents:
         for case_dict, case in zip(data["cases"], h.cases, strict=True):

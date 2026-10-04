@@ -66,3 +66,12 @@ def test_modelref_parse():
     with pytest.raises(ValueError):
         ModelRef.parse("nocolon")
     assert ModelRef.parse("or:meta/llama:free").model == "meta/llama:free"
+
+
+def test_render_with_custom_name():
+    docs = [Document(name="a.txt", text="A")]
+    assert render_user("{{ doc[0].text }}", "hi", docs, documents_name="doc") == "A"
+    with pytest.raises(TemplateRenderError, match="doc"):
+        render_user("{{ doc[0].text }}", "hi", docs)
+    with pytest.raises(TemplateRenderError):
+        render_user("{{ documents[0].text }}", "hi", docs, documents_name="doc")
