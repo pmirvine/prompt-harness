@@ -92,3 +92,97 @@ def make_pptx(slides: list[dict]) -> bytes:
     buf = io.BytesIO()
     prs.save(buf)
     return buf.getvalue()
+
+
+def make_xlsx(sheets: dict[str, list[list]]) -> bytes:
+    import openpyxl
+
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    for title, rows in sheets.items():
+        ws = wb.create_sheet(title)
+        for row in rows:
+            ws.append(row)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+_ODF_NS = (
+    'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" '
+    'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" '
+    'xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" '
+    'xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0"'
+)
+
+
+def _odf(body: str, mime: str) -> bytes:
+    from xml.sax.saxutils import escape  # noqa: F401  (callers escape first)
+    import zipfile
+
+    content = (
+        f'<?xml version="1.0" encoding="UTF-8"?><office:document-content {_ODF_NS}>'
+        f"<office:body>{body}</office:body></office:document-content>"
+    )
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("mimetype", mime, compress_type=zipfile.ZIP_STORED)
+        z.writestr("content.xml", content)
+    return buf.getvalue()
+
+
+def make_odt(paragraphs: list[str]) -> bytes:
+    from xml.sax.saxutils import escape
+
+    body = "".join(
+        f"<text:p>{escape(p)}</text:p>" if not p.startswith("# ")
+        else f'<text:h text:outline-level="1">{escape(p[2:])}</text:h>'
+        for p in paragraphs
+    )
+    return _odf(
+        f"<office:text>{body}</office:text>", "application/vnd.oasis.opendocument.text"
+    )
+
+
+def make_ods(sheets: dict[str, list[list]]) -> bytes:
+    from xml.sax.saxutils import escape
+
+    out = []
+    for name, rows in sheets.items():
+        trs = ""
+        for row in rows:
+            tcs = ""
+            for v in row:
+                if isinstance(v, (int, float)):
+                    tcs += (
+                        f'<table:table-cell office:value-type="float" '
+                        f'office:value="{v}"><text:p>{v}</text:p></table:table-cell>'
+                    )
+                elif v in (None, ""):
+                    tcs += "<table:table-cell/>"
+                else:
+                    tcs += (
+                        '<table:table-cell office:value-type="string">'
+                        f"<text:p>{escape(str(v))}</text:p></table:table-cell>"
+                    )
+            trs += f"<table:table-row>{tcs}</table:table-row>"
+        out.append(f'<table:table table:name="{escape(name)}">{trs}</table:table>')
+    return _odf(
+        f"<office:spreadsheet>{''.join(out)}</office:spreadsheet>",
+        "application/vnd.oasis.opendocument.spreadsheet",
+    )
+
+
+def make_odp(slides: list[list[str]]) -> bytes:
+    from xml.sax.saxutils import escape
+
+    pages = "".join(
+        f'<draw:page draw:name="page{i}">'
+        + "".join(f"<draw:frame><draw:text-box><text:p>{escape(t)}</text:p></draw:text-box></draw:frame>" for t in texts)
+        + "</draw:page>"
+        for i, texts in enumerate(slides, 1)
+    )
+    return _odf(
+        f"<office:presentation>{pages}</office:presentation>",
+        "application/vnd.oasis.opendocument.presentation",
+    )
