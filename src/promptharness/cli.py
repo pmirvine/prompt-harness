@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import textwrap
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -10,6 +11,7 @@ from promptharness import paths
 from promptharness.core import portable
 from promptharness.core.client import ChatClient, OpenAIChatClient
 from promptharness.core.db import Database
+from promptharness.core.examples import ExampleError, list_examples, read_example
 from promptharness.core.models import CaseResult, ModelRef, Provider, Run
 from promptharness.core.portable import PortableError
 from promptharness.core.runner import RunSettings, run_harness
@@ -173,15 +175,29 @@ def export(
 
 @app.command(name="import")
 def import_(
-    path: Path = typer.Argument(...),
+    path: Optional[Path] = typer.Argument(None, help="Harness file (YAML or JSON) to import"),
+    example: Optional[str] = typer.Option(
+        None,
+        "--example",
+        help="Import a bundled starter harness by name instead of a file "
+        "(see `promptharness examples`)",
+    ),
     overwrite: bool = typer.Option(False, "--overwrite"),
 ) -> None:
-    """Import a harness from a YAML or JSON file."""
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as e:
-        typer.echo(f"Error: cannot read {path}: {e}", err=True)
-        raise typer.Exit(1) from e
+    """Import a harness from a YAML or JSON file, or a bundled example."""
+    if (path is None) == (example is None):
+        raise _usage_error("give either a harness file or --example NAME (see `promptharness examples`)")
+    if example is not None:
+        try:
+            text = read_example(example)
+        except ExampleError as e:
+            raise _usage_error(str(e)) from e
+    else:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError as e:
+            typer.echo(f"Error: cannot read {path}: {e}", err=True)
+            raise typer.Exit(1) from e
     db = Database(paths.db_path())
     try:
         h = portable.import_harness(db, text, overwrite=overwrite)
@@ -191,6 +207,17 @@ def import_(
     finally:
         db.close()
     typer.echo(f"Imported {h.name}")
+
+
+@app.command(name="examples")
+def examples_() -> None:
+    """List the starter harnesses bundled with PromptHarness."""
+    for info in list_examples():
+        typer.echo(info.name)
+        for line in textwrap.wrap(info.description, width=76):
+            typer.echo(f"    {line}")
+    typer.echo("")
+    typer.echo("Import one with: promptharness import --example NAME")
 
 
 @provider_app.command("add")

@@ -4,11 +4,13 @@ from pathlib import Path
 
 import pytest
 
+import promptharness
+
 from promptharness.core.checks import run_checks
 from promptharness.core.db import Database
+from promptharness.core.examples import ExampleError, list_examples, read_example
 from promptharness.core.portable import import_harness, parse_harness
 
-QUICKSTART = Path(__file__).resolve().parent.parent / "examples" / "quickstart.harness.yaml"
 
 GOOD = {
     "capital-of-france": "Paris",
@@ -31,7 +33,7 @@ def db(tmp_path):
 
 @pytest.fixture
 def quickstart():
-    harness, outputs = parse_harness(QUICKSTART.read_text(encoding="utf-8"))
+    harness, outputs = parse_harness(read_example("quickstart"))
     return harness, outputs
 
 
@@ -58,6 +60,41 @@ def test_quickstart_checks_accept_good_and_reject_bad_answers(quickstart, name):
 
 
 def test_quickstart_imports(db):
-    h = import_harness(db, QUICKSTART.read_text(encoding="utf-8"))
+    h = import_harness(db, read_example("quickstart"))
     assert h.name == "quickstart"
     assert db.get_harness("quickstart") is not None
+
+
+def test_examples_are_bundled_inside_the_package():
+    # A normal (non-editable) install only contains files under src/promptharness/.
+    pkg = Path(promptharness.__file__).resolve().parent / "examples"
+    assert (pkg / "quickstart.harness.yaml").is_file()
+    assert (pkg / "summarize.harness.yaml").is_file()
+
+
+def test_list_examples_names_and_descriptions():
+    infos = list_examples()
+    assert [i.name for i in infos] == ["quickstart", "summarize"]
+    assert all(i.description.strip() for i in infos)
+    # Descriptions come from the harness files, with folded YAML whitespace collapsed.
+    assert "\n" not in infos[0].description
+
+
+@pytest.mark.parametrize("name", ["quickstart", "summarize"])
+def test_every_bundled_example_parses_and_imports(db, name):
+    harness, _ = parse_harness(read_example(name))
+    assert harness.cases
+    assert import_harness(db, read_example(name)).name == harness.name
+
+
+def test_unknown_example_lists_the_available_ones():
+    with pytest.raises(ExampleError) as exc:
+        read_example("nope")
+    assert "nope" in str(exc.value)
+    assert "quickstart" in str(exc.value) and "summarize" in str(exc.value)
+
+
+@pytest.mark.parametrize("bad", ["", "../quickstart", "a/b", "quickstart.harness.yaml", "Quickstart"])
+def test_example_names_cannot_escape_the_examples_folder(bad):
+    with pytest.raises(ExampleError):
+        read_example(bad)

@@ -31,15 +31,31 @@ OUT = ROOT / "docs" / "screenshots" / "getting-started"
 WIDTH = 125
 
 
-async def flow(db_file: Path, base_url: str, model: str, provider: str) -> None:
-    from textual.widgets import Button, Input, SelectionList
+class _Done(Exception):
+    """Raised once every screenshot requested with --only has been written."""
 
+
+async def flow(
+    db_file: Path, base_url: str, model: str, provider: str, only: set[str] | None = None
+) -> None:
     from promptharness.core.db import Database
     from promptharness.tui.app import PromptHarnessApp
-    from promptharness.tui.matrix import MatrixScreen
 
     app = PromptHarnessApp(db=Database(db_file))
-    async with app.run_test(size=(WIDTH, 12)) as pilot:
+    remaining = set(only) if only is not None else None
+    try:
+        await _drive(app, pilot_size=(WIDTH, 12), provider=provider, base_url=base_url, model=model,
+                     only=only, remaining=remaining)
+    except _Done:
+        pass
+
+
+async def _drive(app, *, pilot_size, provider, base_url, model, only, remaining) -> None:
+    from textual.widgets import Button, Input, SelectionList
+
+    from promptharness.tui.matrix import MatrixScreen
+
+    async with app.run_test(size=pilot_size) as pilot:
 
         async def settle():
             await pilot.pause()
@@ -47,9 +63,15 @@ async def flow(db_file: Path, base_url: str, model: str, provider: str) -> None:
             await pilot.pause()
 
         async def shot(name: str, height: int):
+            if only is not None and name not in only:
+                return  # the flow still runs; only the requested images are rewritten
             await pilot.resize_terminal(WIDTH, height)
             await pilot.pause()
             save(app, name, OUT)
+            if remaining is not None:
+                remaining.discard(name)
+                if not remaining:
+                    raise _Done
 
         await settle()
         await shot("01-first-launch", 12)
@@ -75,7 +97,7 @@ async def flow(db_file: Path, base_url: str, model: str, provider: str) -> None:
         await settle()
         await pilot.press("i")
         await settle()
-        app.screen.query_one("#import-path", Input).value = "examples/quickstart.harness.yaml"
+        app.screen.query_one("#import-path", Input).value = "example:quickstart"
         await pilot.pause()
         await shot("04-import-harness", 17)
 
@@ -121,13 +143,17 @@ def main() -> int:
     ap.add_argument("--base-url", default="http://localhost:1234/v1")
     ap.add_argument("--model", default="prism-ml/bonsai-27b")
     ap.add_argument("--provider", default="lmstudio")
+    ap.add_argument(
+        "--only",
+        help="comma-separated screenshot names to rewrite (default: all), e.g. 04-import-harness",
+    )
     args = ap.parse_args()
 
     tmp = tempfile.mkdtemp(prefix="promptharness-gs-")
     os.environ["PROMPTHARNESS_HOME"] = tmp
-    os.chdir(ROOT)  # the import step types a path relative to the repo root
     try:
-        asyncio.run(flow(Path(tmp) / "gs.db", args.base_url, args.model, args.provider))
+        only = set(args.only.split(",")) if args.only else None
+        asyncio.run(flow(Path(tmp) / "gs.db", args.base_url, args.model, args.provider, only))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     return 0

@@ -57,31 +57,39 @@ The screenshots show real results: the outputs, token counts and latencies come 
 
 Requires Python 3.11+.
 
+**Install the app** (no clone needed; the starter harnesses are bundled with it):
+
+```sh
+uv tool install git+https://github.com/pmirvine/prompt-harness.git
+```
+
+or, without uv:
+
+```sh
+pip install git+https://github.com/pmirvine/prompt-harness.git
+```
+
+**Or work from a clone** to hack on it or run the tests:
+
 ```sh
 git clone https://github.com/pmirvine/prompt-harness.git
 cd prompt-harness
 uv venv && uv pip install -e .
 ```
 
-or, without uv:
-
-```sh
-pip install -e .
-```
-
 Launch the TUI:
 
 ```sh
-promptharness            # or: uv run promptharness
+promptharness            # from a clone: uv run promptharness
 ```
 
-`promptharness --help` lists the subcommands (`run`, `export`, `import`, `provider`).
+`promptharness --help` lists the subcommands (`run`, `export`, `import`, `examples`, `provider`).
 
 ## Quickstart
 
 ### The starter test case
 
-The repo ships a starter harness, [`examples/quickstart.harness.yaml`](examples/quickstart.harness.yaml). It is a model-agnostic smoke test of three tiny deterministic cases that any chat model should pass. It has no accepted model, so you choose what to try.
+PromptHarness ships a starter harness called `quickstart`, bundled with the package so it works after a normal install (its source is [`src/promptharness/examples/quickstart.harness.yaml`](src/promptharness/examples/quickstart.harness.yaml)). It is a model-agnostic smoke test of three tiny deterministic cases that any chat model should pass. It has no accepted model, so you choose what to try.
 
 | Case | Prompt (abridged) | What it checks |
 |------|-------------------|----------------|
@@ -99,8 +107,8 @@ With a local server such as LM Studio, Ollama or vLLM running (LM Studio's serve
 # 1. Register the server (no API key needed locally)
 promptharness provider add lmstudio --base-url http://localhost:1234/v1
 
-# 2. Load the starter harness
-promptharness import examples/quickstart.harness.yaml
+# 2. Load the starter harness (promptharness examples lists the bundled ones)
+promptharness import --example quickstart
 
 # 3. Run it against a model you have loaded (provider:model)
 promptharness run quickstart --model lmstudio:your-model-id
@@ -118,7 +126,7 @@ three-colors         pass
 
 and exit code 0. A failure prints the reason underneath the table. To also exercise the LLM judge, add a `judge_prompt` to a case in the harness and pass `--judge lmstudio:your-model-id`.
 
-In the TUI the same steps are: `4` then `a` to add the provider, `t` to fetch its models, `1` then `i` to import `examples/quickstart.harness.yaml`, and `m` to run it against one or more models.
+In the TUI the same steps are: `4` then `a` to add the provider, `t` to fetch its models, `1` then `i` to import it (type `example:quickstart` in the box), and `m` to run it against one or more models.
 
 **Reasoning models** (those that "think" before answering) spend part of `max_tokens` on hidden reasoning. If the limit is too low they return an empty answer. The quickstart sets `max_tokens: 2048` for this reason, and a result that hit the limit carries a warning such as `empty answer: the model used its token limit ... raise max_tokens`.
 
@@ -298,10 +306,10 @@ Exit codes for `run`:
 
 Provider settings, env var names, keys, run history and verdicts are **not** exported. On import, inline documents that do not exist at their original path are written under `<data dir>/documents/<harness name>/` and the case is repointed there. If the file has `accepted_outputs`, they become an accepted run for `accepted_model`; those restored outputs carry no check results, so their status is `manual`. Importing a name that exists fails unless you pass `--overwrite` (or confirm in the TUI). An imported harness may reference local document paths; when it runs, those files' contents are sent to the provider you run it against, so review a harness from someone else (its cases' document paths) before running it.
 
-A ready-to-use example with two tiny cases is in [`examples/summarize.harness.yaml`](examples/summarize.harness.yaml):
+A second bundled example with two tiny cases is `summarize` ([source](src/promptharness/examples/summarize.harness.yaml)); `promptharness examples` lists everything bundled:
 
 ```sh
-promptharness import examples/summarize.harness.yaml
+promptharness import --example summarize
 promptharness run summarize-example --model openai:gpt-4o-mini
 ```
 

@@ -105,6 +105,7 @@ class ReplayClient:
 
 
 def seed(db):
+    from promptharness.core.examples import read_example
     from promptharness.core.models import ModelRef, Provider
     from promptharness.core.portable import import_harness
     from promptharness.core.runner import run_harness
@@ -123,8 +124,8 @@ def seed(db):
     db.save_models("openai", ["gpt-4o-mini"])
     db.save_models("ollama", ["llama3.2"])
 
-    for name in ("quickstart.harness.yaml", "summarize.harness.yaml"):
-        import_harness(db, (ROOT / "examples" / name).read_text(encoding="utf-8"))
+    for name in ("quickstart", "summarize"):
+        import_harness(db, read_example(name))
 
     # The imported example's accepted outputs become a stored run; give it a real-looking time too.
     imported = db.list_runs("summarize-example")[0]

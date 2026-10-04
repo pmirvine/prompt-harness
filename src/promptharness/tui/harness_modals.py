@@ -11,6 +11,8 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Checkbox, Input, Label, Select, SelectionList
 
+from promptharness.core.examples import PREFIX as EXAMPLE_PREFIX
+from promptharness.core.examples import ExampleError, read_example
 from promptharness.core.models import ModelRef
 from promptharness.core.portable import (
     PortableError,
@@ -155,8 +157,8 @@ class ImportForm(ModalScreen["Harness | None"]):
     def compose(self) -> ComposeResult:
         with Vertical(id="form", classes="compact"):
             yield Label("Import harness (YAML or JSON)")
-            yield Label("File path")
-            yield Input("", id="import-path", placeholder="path/to/harness.yaml")
+            yield Label("File path, or example:NAME (try example:quickstart)")
+            yield Input("", id="import-path", placeholder="path/to/harness.yaml or example:quickstart")
             yield Label("", id="import-error", classes="form-error")
             with Horizontal(id="buttons"):
                 yield Button("Import", id="import-submit", variant="primary")
@@ -172,12 +174,19 @@ class ImportForm(ModalScreen["Harness | None"]):
         if not raw:
             self._error("File path is required")
             return
-        path = Path(raw).expanduser()
-        try:
-            text = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as e:
-            self._error(f"cannot read {path}: {e}")
-            return
+        if raw.startswith(EXAMPLE_PREFIX):
+            try:
+                text = read_example(raw[len(EXAMPLE_PREFIX):].strip())
+            except ExampleError as e:
+                self._error(str(e))
+                return
+        else:
+            path = Path(raw).expanduser()
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as e:
+                self._error(f"cannot read {path}: {e}")
+                return
         try:
             harness, _ = parse_harness(text)
             exists = self.app.db.get_harness(harness.name) is not None  # type: ignore[attr-defined]

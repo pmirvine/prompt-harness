@@ -1,6 +1,6 @@
 # Getting started
 
-This guide takes you from a fresh clone to your first passing test in about ten minutes. You will connect a model server, load a ready-made test, and run it. Every screenshot below was taken from a real run of these exact steps.
+This guide takes you from nothing installed to your first passing test in about ten minutes. You will connect a model server, load a ready-made test, and run it. Every screenshot below was taken from a real run of these exact steps.
 
 **What you need**
 
@@ -11,12 +11,12 @@ This guide takes you from a fresh clone to your first passing test in about ten 
 ## 1. Install PromptHarness
 
 ```sh
-git clone https://github.com/pmirvine/prompt-harness.git
-cd prompt-harness
-uv venv && uv pip install -e .
+uv tool install git+https://github.com/pmirvine/prompt-harness.git
 ```
 
-Without uv, use `python -m venv .venv && source .venv/bin/activate && pip install -e .` instead. Stay in the `prompt-harness` folder for the rest of this guide: step 5 uses a file path relative to it.
+This installs the `promptharness` command, with the starter test case bundled. No clone is needed. Without uv, use `pip install git+https://github.com/pmirvine/prompt-harness.git` (in a virtual environment) instead.
+
+Working from a clone instead, to hack on it? Run `git clone https://github.com/pmirvine/prompt-harness.git`, then `cd prompt-harness && uv venv && uv pip install -e .`, and put `uv run` in front of `promptharness` in the commands below.
 
 ## 2. Start your model server
 
@@ -29,7 +29,7 @@ You can check the server is up with `curl http://localhost:1234/v1/models` (use 
 ## 3. Launch the app
 
 ```sh
-uv run promptharness
+promptharness
 ```
 
 You land on the **Harnesses** tab, which is empty. A *harness* is a saved prompt with test cases; you will import one in step 5. The keys available on the current screen are always listed in the footer.
@@ -58,7 +58,7 @@ If the connection fails, a message tells you why and offers a box where you can 
 
 ## 5. Import the starter harness
 
-The repo includes `examples/quickstart.harness.yaml`, three tiny tests that any chat model should pass:
+PromptHarness bundles a starter harness called `quickstart`: three tiny tests that any chat model should pass. (Run `promptharness examples` to list everything bundled.)
 
 | Test | What it checks |
 |------|----------------|
@@ -67,7 +67,7 @@ The repo includes `examples/quickstart.harness.yaml`, three tiny tests that any 
 | `three-colors` | The answer is exactly three lowercase colors separated by commas |
 
 1. Press `1` to go back to the **Harnesses** tab, then `i` to import.
-2. Type the path `examples/quickstart.harness.yaml` and press `Tab` to the **Import** button, then `Enter`.
+2. Type `example:quickstart` (the name of the bundled harness; you can also type the path to your own YAML file) and press `Tab` to the **Import** button, then `Enter`.
 
 ![The Import harness dialog with the path to the starter harness](screenshots/getting-started/04-import-harness.png)
 
@@ -109,7 +109,7 @@ Everything above is also available without the interface, which is handy for scr
 
 ```sh
 promptharness provider add lmstudio --base-url http://localhost:1234/v1
-promptharness import examples/quickstart.harness.yaml
+promptharness import --example quickstart
 promptharness run quickstart --model lmstudio:your-model-id
 ```
 
