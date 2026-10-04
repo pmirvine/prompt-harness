@@ -1031,3 +1031,27 @@ async def test_case_form_normalises_document_paths(tmp_path):
             str(tmp_path / "a.txt"),
         ]
     assert app.client.calls == []
+
+
+async def test_studio_output_wraps_to_the_pane_width_in_a_narrow_terminal(tmp_path):
+    # RichLog renders at least `min_width` (78 by default) columns wide, which is wider than
+    # the output pane in a 125-column terminal, so long results were cut off on the right.
+    db = make_db(tmp_path)
+    db.save_provider(Provider(name="p", base_url="https://p.test", api_key_env="K"))
+    db.save_models("p", ["m1"])
+    app = PromptHarnessApp(db=db, client=FakeClient(["word " * 60]))
+    async with app.run_test(size=(125, 40)) as pilot:
+        await pilot.press("2")
+        await pilot.pause()
+        app.query_one("#model", Select).value = "p:m1"
+        pane = app.query_one(StudioPane)
+        await pane.add_case(Case(name="c1", input="hi"))
+        app.query_one("#cases", ListView).focus()
+        await pilot.press("r")
+        await pilot.pause()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        log = app.query_one("#output", RichLog)
+        width = log.scrollable_content_region.width
+        assert log.lines
+        assert max(strip.cell_length for strip in log.lines) <= width

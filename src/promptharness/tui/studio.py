@@ -106,7 +106,8 @@ class StudioPane(StudioPersistMixin, Widget):
                 yield Label(HINT, id="studio-hint")
                 yield Label("idle", id="studio-status")
                 yield CaseList(id="cases")
-                yield RichLog(id="output", wrap=True, markup=False)
+                # min_width=1: the default (78) is wider than this pane in a ~125-column terminal.
+                yield RichLog(id="output", wrap=True, markup=False, min_width=1)
 
     def on_mount(self) -> None:
         self.refresh_models()

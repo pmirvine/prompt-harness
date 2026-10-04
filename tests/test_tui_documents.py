@@ -140,7 +140,8 @@ async def test_result_header_lists_attached_documents_and_warnings(tmp_path):
     pdf = tmp_path / "report.pdf"
     pdf.write_bytes(docfixtures.make_pdf(["Alpha", ""]))
     app = PromptHarnessApp(db=make_db(tmp_path), client=FakeClient(["answer"]))
-    async with app.run_test() as pilot:
+    # Wide enough that the output pane does not wrap the lines checked below.
+    async with app.run_test(size=(200, 40)) as pilot:
         pane = await open_studio(app, pilot)
         await pane.add_case(Case(name="c1", documents=[str(note), str(pdf)]))
         await run_case(app, pilot)
