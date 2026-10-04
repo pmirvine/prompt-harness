@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from promptharness.core.checks import run_checks
 from promptharness.core.client import ChatClient, ClientError
 from promptharness.core.judge import JudgeError, run_judge
+from promptharness.core.messages import build_user_content, redact_images, summarize_documents
 from promptharness.core.models import (
     Case,
     CaseResult,
@@ -29,6 +30,13 @@ class RunSettings:
 
 def _error_result(case: Case, error: str, **extra) -> CaseResult:
     return CaseResult(case_name=case.name, status="error", error=error, **extra)
+
+
+def _with_image_hint(e: ClientError, has_images: bool) -> ClientError:
+    """A server's client error for a request with images likely means no vision support."""
+    if has_images and e.kind == "other":
+        return ClientError("other", f"{e} (the model may not support image input)")
+    return e
 
 
 async def evaluate_case(
@@ -58,14 +66,29 @@ async def _evaluate(
     client: ChatClient,
     judge: tuple[Provider, str] | None,
 ) -> CaseResult:
-    docs = load_documents(case.documents)
-    user = render_user(prompt.template, case.input, docs)
+    # Readers can be slow (PDF, LibreOffice); keep the event loop (and the TUI) free.
+    docs = await asyncio.to_thread(load_documents, case.documents)
+    user = render_user(prompt.template, case.input, docs, prompt.documents_name)
     messages: list[dict] = []
     if prompt.system:
         messages.append({"role": "system", "content": prompt.system})
-    messages.append({"role": "user", "content": user})
+    messages.append({"role": "user", "content": build_user_content(user, docs)})
+    has_images = any(d.kind == "image" for d in docs)
 
-    chat = await client.chat(provider, model, messages, prompt)
+    try:
+        chat = await client.chat(provider, model, messages, prompt)
+    except ClientError as e:
+        hinted = _with_image_hint(e, has_images)
+        if hinted is e:
+            raise
+        raise hinted from e
+    # Redact here too: not every ChatClient redacts what it records.
+    request = {
+        **chat.request,
+        "messages": redact_images(chat.request.get("messages", messages)),
+        "documents": summarize_documents(docs),
+    }
+    doc_warnings = [w for d in docs for w in d.warnings]
     exp = case.expectation
     checks: list[CheckResult] = run_checks(chat.text, exp)
 
@@ -76,25 +99,37 @@ async def _evaluate(
         jprov, jmodel = judge
         try:
             checks.append(
-                await run_judge(client, jprov, jmodel, exp.judge_prompt, case.input, chat.text)
+                await run_judge(
+                    client,
+                    jprov,
+                    jmodel,
+                    exp.judge_prompt,
+                    case.input,
+                    chat.text,
+                    docs,
+                    prompt.documents_name,
+                )
             )
         except JudgeError as e:
             judge_error = True
             judge_warning = str(e)
         except ClientError as e:
-            error = f"{e.kind}: {e}"
+            hinted = _with_image_hint(e, has_images)
+            error = f"{hinted.kind}: judge request failed: {hinted}"
 
     return CaseResult(
         case_name=case.name,
         status=final_status(checks, error, judge_error, None),
         output=chat.text,
-        request=chat.request,
+        request=request,
         response=chat.response,
         latency_ms=chat.latency_ms,
         prompt_tokens=chat.prompt_tokens,
         completion_tokens=chat.completion_tokens,
         checks=checks,
-        warnings=list(chat.warnings) + ([f"judge: {judge_warning}"] if judge_warning else []),
+        warnings=doc_warnings
+        + list(chat.warnings)
+        + ([f"judge: {judge_warning}"] if judge_warning else []),
         error=error,
     )
 

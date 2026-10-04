@@ -28,6 +28,7 @@ def test_import_unknown_example_is_a_usage_error_listing_the_choices():
     r = runner.invoke(cli_mod.app, ["import", "--example", "nope"])
     assert r.exit_code == 2
     assert "nope" in r.output and "quickstart" in r.output and "summarize" in r.output
+    assert "three-documents" in r.output and "mixed-formats" in r.output
     assert _harness_names() == []
 
 
@@ -64,5 +65,12 @@ def test_import_from_a_file_path_still_works(tmp_path):
 def test_examples_command_lists_names_and_descriptions():
     r = runner.invoke(cli_mod.app, ["examples"])
     assert r.exit_code == 0, r.output
-    assert "quickstart" in r.output and "summarize" in r.output
+    assert all(n in r.output for n in ("mixed-formats", "quickstart", "summarize", "three-documents"))
     assert "promptharness import --example" in r.output
+
+
+def test_import_document_examples_by_name():
+    for name in ("three-documents", "mixed-formats"):
+        r = runner.invoke(cli_mod.app, ["import", "--example", name])
+        assert r.exit_code == 0, r.output
+    assert _harness_names() == ["mixed-formats", "three-documents"]

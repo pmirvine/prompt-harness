@@ -6,11 +6,12 @@ You work out a prompt in a **studio** against a handful of test cases, save it a
 
 Nothing leaves your machine except requests to the provider base URLs you configure. There is no telemetry, cloud sync, account or web UI.
 
-**New here? Follow the [Getting started guide](docs/getting-started.md)** for a step-by-step walk-through of your first test run, with screenshots.
+**New here? Follow the [Getting started guide](docs/getting-started.md)** for a step-by-step walk-through of your first test run, with screenshots. Then [Working with documents](docs/working-with-documents.md) shows how to test a prompt that reads Word, PDF and image files.
 
 ## Features
 
 - **Studio:** edit a system prompt and a Jinja2 user template, attach test cases (inline text and/or documents), run one case or all, and step back through your prompt edits.
+- **Documents:** attach text, PDF, Word, PowerPoint, Excel, OpenDocument and RTF files and images to a case, refer to them from the template, and send images to vision models. The judge sees them too.
 - **Checks:** must-include / must-not-include (substring or regex), exact or normalized match, JSON and JSON Schema validity, an optional LLM judge on an independent model, and manual pass/fail.
 - **Harnesses:** save a prompt, its cases, expectations, accepted model and accepted outputs, then re-run it against any mix of models and providers and read a case × model matrix.
 - **Compare and re-test:** view outputs side by side against the accepted output, or copy a past run and swap the model to see if a replacement still passes.
@@ -198,10 +199,11 @@ promptharness provider add groq       --base-url https://api.groq.com/openai/v1 
 promptharness provider add together   --base-url https://api.together.xyz/v1    --api-key-env TOGETHER_API_KEY
 promptharness provider add vllm       --base-url http://localhost:8000/v1
 promptharness provider add ollama     --base-url http://localhost:11434/v1
+promptharness provider add lmstudio   --base-url http://localhost:1234/v1 --timeout 300
 promptharness provider list
 ```
 
-`provider add` on an existing name updates only the options you pass and keeps the rest (including whether it is enabled); it prints `Added` or `Updated`. `--max-tokens-param max_completion_tokens` (also a choice in the TUI form) sends the token limit as `max_completion_tokens`, which some newer OpenAI models require. If a provider rejects a parameter (for example `temperature`), the request is retried without it and the result carries a `dropped param: ...` warning. Models are referred to everywhere as `provider:model`, for example `openai:gpt-4o-mini` or `ollama:llama3.2`.
+`provider add` on an existing name updates only the options you pass and keeps the rest (including whether it is enabled); it prints `Added` or `Updated`. `--max-tokens-param max_completion_tokens` (also a choice in the TUI form) sends the token limit as `max_completion_tokens`, which some newer OpenAI models require. Each request waits 60 seconds and is retried twice by default; `--timeout SECONDS` (greater than 0) and `--max-retries N` (0 or more) change that for one provider, for example `promptharness provider add lmstudio --timeout 300` for a slow local model (the Providers form has the same two fields, blank meaning the default). If a provider rejects a parameter (for example `temperature`), the request is retried without it and the result carries a `dropped param: ...` warning. Models are referred to everywhere as `provider:model`, for example `openai:gpt-4o-mini` or `ollama:llama3.2`.
 
 ## Key bindings
 
@@ -240,7 +242,7 @@ Global (on the main screen): `1` Harnesses, `2` Studio, `3` Runs, `4` Providers,
 
 ## Walk-through: studio to re-test
 
-1. **Studio (`2`).** Choose a model under test (from the dropdown, or type `provider:model` in the manual box and press Enter). Optionally choose a judge model. Write a system prompt and a Jinja2 user template (`{{ input }}` and `documents` are available; the default is `{{ input }}`), and set temperature and max tokens if you want. Add cases with `n`: a name, input text, optional document paths (plain UTF-8 text files, comma-separated), and expectations (see below). Run cases with `r`/`R`/`ctrl+r` and read the output and check results. Edit and re-run until it is right; `alt+left`/`alt+right` walk through earlier prompt versions.
+1. **Studio (`2`).** Choose a model under test (from the dropdown, or type `provider:model` in the manual box and press Enter). Optionally choose a judge model. Write a system prompt and a Jinja2 user template (`{{ input }}` and `documents`, or the name set in **Docs as**, are available; the default is `{{ input }}`), and set temperature and max tokens if you want. Add cases with `n`: a name, input text, optional document paths (comma-separated; see [Documents](#documents) for the formats), and expectations (see below). Run cases with `r`/`R`/`ctrl+r` and read the output and check results. Edit and re-run until it is right; `alt+left`/`alt+right` walk through earlier prompt versions.
 2. **Save harness (`s` or `ctrl+s`).** Give it a name. The prompt, cases and the model under test are stored as a harness. If you have fresh results for the current prompt, model and judge, they are stored as the harness's **accepted run**, which later runs are compared against. If not, the harness is saved without an accepted run and a warning says so.
 3. **Regression run (Harnesses, `m`).** Select one or more models (space toggles; or type `provider:model`, comma-separated) and an optional judge. A matrix of case x model fills in live. `enter` on a cell shows the request outcome, checks with reasons, warnings, tokens and latency; `v` sets a manual verdict. Each finished model is saved as a run.
 4. **Compare (`c` in the matrix or in cell details).** Shows one case across the accepted run (when the harness has one) and every model in the matrix, pane by pane (`left`/`right`).
@@ -266,11 +268,148 @@ A case ends with one of these statuses:
 |--------|---------|
 | `pass` | At least one check ran and all passed, or a manual verdict of pass |
 | `fail` | A check failed, or a manual verdict of fail |
-| `error` | The request itself failed (auth, timeout, rate limit, missing env var, unknown or disabled provider, unreadable document, template error) |
-| `judge_error` | Deterministic checks passed but the judge failed or was unavailable (malformed output twice, request error, judge provider unknown or disabled) |
+| `error` | A request failed (auth, timeout, rate limit, missing env var, unknown or disabled provider, unreadable document, template error), including the judge's request, which reads `<kind>: judge request failed: ...` |
+| `judge_error` | Deterministic checks passed but the judge could not give a verdict: it returned malformed output twice, the judge prompt template failed to render, or the judge provider is unknown or disabled |
 | `manual` | No checks decided the outcome: nothing to check automatically. Review the output and set a verdict with `v` |
 
 Precedence: `error` first; then any failed check or a manual fail gives `fail`; then a manual pass gives `pass` (so a manual pass resolves `manual` and `judge_error` but cannot override a failed check). Provider failures are shown per case and never crash the app.
+
+## Documents
+
+A case can carry documents: files whose contents the template can put into the prompt. For a step-by-step walk-through with screenshots, see [Working with documents](docs/working-with-documents.md). In the Studio case form (`n`, or `enter` on a case) list their paths, comma-separated, under "Document paths"; `~` is expanded and the paths are stored as absolute paths. In a harness file they are the case's `documents:` list (relative paths there are resolved against the directory you run `promptharness` from):
+
+```yaml
+cases:
+- name: total
+  input: What is the sum of the invoice totals?
+  documents:
+  - invoices/invoice-1041.docx
+  - invoices/invoice-1042.pdf
+  - invoices/invoice-1043.png
+```
+
+### Formats
+
+The reader is chosen by the file extension, in upper or lower case. Images, PDFs and the zip-based formats (`.docx`, `.pptx`, `.xlsx`, OpenDocument) are also checked against their content, so for example a `.pdf` that is not a PDF is rejected rather than misread.
+
+| Extension | Kind | How it is read |
+|-----------|------|----------------|
+| `.png` `.jpg` `.jpeg` `.gif` `.webp` | image | Sent to the model as an image (see [below](#images-and-vision-models)). The type comes from the file's leading bytes, not the extension. At most 20 MB |
+| `.pdf` | text | The text of each page, each page after a `--- page N ---` line |
+| `.docx` | text | Paragraphs and tables in document order; each table row is one line with its cells separated by ` \| ` |
+| `.pptx` | text | For each slide a `--- slide N ---` line, then the text of its shapes (including grouped shapes), its tables, and its speaker notes as `Notes: ...` |
+| `.xlsx` `.xls` | text | For each sheet a `--- sheet NAME ---` line, then one tab-separated line per row. Formula cells give the value the spreadsheet app last saved |
+| `.ods` | text | Same layout as `.xlsx` |
+| `.odt` | text | Paragraphs and headings, one per line |
+| `.odp` | text | For each slide a `--- slide N ---` line, then its text |
+| `.rtf` | text | The text with the RTF formatting removed |
+| `.doc` (legacy Word) | text | Converted by `antiword` if it is installed, otherwise by LibreOffice (`soffice` or `libreoffice` on the `PATH`), with a 60 second timeout. Neither is installed with PromptHarness; without one the case fails with `legacy .doc needs antiword or LibreOffice; convert the file to .docx` |
+| anything else | text | Read as is if it is UTF-8 text with no NUL bytes (`.txt`, `.md`, `.csv`, `.json`, source code, ...); otherwise the case fails |
+
+### Referring to documents in the template
+
+The template sees the case's documents as a list called `documents`, in the order the case lists them. Each document has:
+
+| Field | Value |
+|-------|-------|
+| `name` | The file name, without its directory |
+| `text` | The extracted text. For an image it is the marker `[attached image: NAME]` |
+| `kind` | `text` or `image` |
+| `mime` | The media type, such as `application/pdf`, `image/png`, or `text/plain` for plain text |
+| `index` | Its position in the list, starting at 0 |
+| `pages` | The number of pages (PDF), slides (`.pptx`, `.odp`) or sheets (`.xlsx`, `.xls`, `.ods`); `None` for other formats |
+
+Refer to one document by position, or loop over them all:
+
+```jinja
+{{ input }}
+
+Invoice A ({{ documents[0].name }}):
+{{ documents[0].text }}
+```
+
+```jinja
+{{ input }}
+
+{% for d in documents %}Document {{ loop.index }}: {{ d.name }}
+{{ d.text }}
+
+{% endfor %}
+```
+
+A text document reaches the model only through the template: if the template does not include its `text`, the model does not see it. Images are the exception: every image document is attached to the request whether or not the template mentions it, and its `text` marker lets the template say where it belongs (the loop above writes `[attached image: invoice-1043.png]` in its place). Referring to a document the case does not have, such as `documents[3]` on a case with three, ends that case with `error` (`list object has no element 3`).
+
+### Choosing the name
+
+`documents` is the default name. To use another, type it in the Studio's **Docs as** field (empty means `documents`) or set `prompt.documents_name` in a harness file:
+
+```yaml
+prompt:
+  template: '{{ input }} {{ docs[0].text }}'
+  documents_name: docs
+```
+
+Only one name is active at a time: with `docs`, a template that uses `documents` fails with `'documents' is undefined`. The name must be a valid Python identifier, must not be a Python keyword, and must not be one of `input`, `output`, `self`, `true`, `false`, `none`, `loop` or `caller`. An invalid name in the Studio shows a notification and nothing runs or saves; in a harness file the import fails. The name is part of the prompt, so changing it gives a new prompt hash, while prompts that keep the default `documents` keep the hash they had before this setting existed. Exports write `documents_name` only when it is not the default.
+
+### Images and vision models
+
+Image documents are sent as `image_url` parts (base64 `data:` URLs) after the text of the user message, in document order, so the model must accept image input. Stored runs keep the request with each image replaced by a placeholder such as `data:image/png;base64,<13078 bytes omitted>`, so the database never holds image data. The result header in the TUI lists what was attached, for example `documents: invoice-1041.docx (text) · invoice-1042.pdf (text, 1 page) · invoice-1043.png (image)`.
+
+A model without vision support normally rejects the request. The case ends with `error`: the server's message plus a hint. For example, from LM Studio with `openai/gpt-oss-20b`:
+
+```
+other: Error code: 400 - {'error': {'message': 'The provided messages contain images, but openai/gpt-oss-20b does not support image inputs.', ...}} (the model may not support image input)
+```
+
+The hint is added to any failed request that contains images, except authentication, timeout, rate-limit and configuration errors, so read the server's message to confirm the cause. There is no OCR fallback.
+
+### What the judge sees
+
+The judge always receives the case's documents; the judge prompt does not need to mention them. Its user message has the sections `Criteria:` (the rendered judge prompt), `Input:`, `Documents:` (only when the case has documents) and `Output:`. Each document appears as `[INDEX] NAME` followed by its text. Image documents appear as their marker and the images are attached, so when a case has images its judge model must accept images too (a judge that rejects them ends the case with the same hinted `error`).
+
+The judge prompt is itself a Jinja template with `input`, `output` (the model's answer, trimmed) and the documents under the same name as the user template, so it can point at specific documents:
+
+```jinja
+The answer must name the invoice with the highest total among these documents:
+{{ documents[0].name }}, {{ documents[1].name }} and {{ documents[2].name }}.
+```
+
+A judge prompt without template syntax is sent unchanged. To include a literal `{{` or `{%`, wrap that part in `{% raw %}...{% endraw %}`. A judge prompt that fails to render ends the case with `judge_error` and the warning `judge: judge prompt template error: ...`.
+
+### Warnings and limits
+
+A document problem never stops a run: the case that uses the document ends with `error`, the message starts with `unsupported:` followed by the path and the reason, and the other cases carry on. Problems that only affect part of a document are warnings: they appear in the result details, and `promptharness run` prints them as `CASE × MODEL: warning: ...`.
+
+- **Spreadsheets** are read up to 5,000 rows per sheet. A longer sheet is cut there with the warning `NAME: sheet 'SHEET' truncated at 5000 rows`.
+- **Scanned PDFs** have no text to extract. A page without text gives the warning `NAME: page N has no extractable text`; a PDF with no text on any page is an error (`no extractable text; it may be a scan. Convert the pages to images and attach those`). There is no OCR.
+- **Encrypted PDFs** are opened with an empty password if possible; otherwise they are an error (`password-protected`). AES-encrypted PDFs also need the `cryptography` package, which is not installed with PromptHarness.
+- **Images** larger than 20 MB, and image types other than PNG, JPEG, GIF and WebP (such as `.bmp`, `.tif`, `.heic` or `.svg`), are errors.
+- **Word, PowerPoint and Excel** (`.docx`, `.pptx`, `.xlsx`) files that would unpack to more than 100 MB are rejected with `file is too large when decompressed`.
+- **OpenDocument** files whose `content.xml` is larger than 50 MB, or that contain DTD or entity declarations, are rejected.
+- **Legacy `.doc`** files need `antiword` or LibreOffice, as described in the [formats table](#formats).
+- **Embedded images** inside PDF, Word, PowerPoint, spreadsheet and OpenDocument files are not extracted; only their text is read. Attach an image file to show the model a picture.
+- **Long documents** are not truncated. A document that does not fit in the model's context fails that case with the server's error.
+
+### Sharing harnesses with documents
+
+`promptharness export NAME --inline-documents` embeds each case's documents in the file, binary ones included (each file at most 10 MB), and importing the file restores them under the data directory. It embeds the contents of every listed file, including the target of a symlink, so review the file before you share it. See [Export and import](#export-and-import).
+
+### Examples
+
+Two bundled examples use documents (`promptharness examples` lists them):
+
+- `three-documents` ([source](src/promptharness/examples/three-documents.harness.yaml)): three short text invoices attached to every case. The template refers to `documents[0]`, `documents[1]` and `documents[2]`; one case returns JSON checked with a JSON Schema and must-include patterns, and the other has a judge prompt that names the documents.
+- `mixed-formats` ([source](src/promptharness/examples/mixed-formats.harness.yaml)): the same three invoices as a Word file, a PDF and a PNG image, read by a template that loops over `documents`. It needs a vision-capable model: the correct total (400.50) needs the 200.00 EUR from the image.
+
+```sh
+promptharness import --example three-documents
+promptharness run three-documents --model lmstudio:your-model-id --judge lmstudio:your-model-id
+
+promptharness import --example mixed-formats
+promptharness run mixed-formats --model lmstudio:your-vision-model-id
+```
+
+In the TUI, type `example:three-documents` or `example:mixed-formats` in the import box (`1`, then `i`). The documents are written under the data directory when the example is imported.
 
 ## CLI
 
@@ -279,7 +418,10 @@ promptharness run NAME --model openai:gpt-4o-mini [--model groq:llama-3.3-70b-ve
     [--judge openai:gpt-4o] [--concurrency 2] [--case CASE_NAME]
 promptharness export NAME [--format yaml|json] [--inline-documents] [--out FILE]
 promptharness import FILE [--overwrite]
-promptharness provider add NAME --base-url URL [--api-key-env VAR] [--max-tokens-param max_tokens|max_completion_tokens]
+promptharness import --example NAME [--overwrite]
+promptharness examples
+promptharness provider add NAME --base-url URL [--api-key-env VAR] [--max-tokens-param max_tokens|max_completion_tokens] \
+    [--timeout SECONDS] [--max-retries N]
 promptharness provider list
 ```
 
@@ -302,9 +444,9 @@ Exit codes for `run`:
 - `format_version` (currently `1`; files with a newer version are rejected)
 - `name`, `description`, `prompt` (system, template, temperature, max_tokens, extra_params) and `cases` (input, document paths, notes, expectation)
 - `accepted_model` (`provider:model`) and `accepted_outputs` (case name to the accepted run's output), when the harness has an accepted run
-- with `--inline-documents` (or the checkbox in the TUI export dialog): each case's `document_texts`, the full text of its documents
+- with `--inline-documents` (or the checkbox in the TUI export dialog): each case's documents themselves, so the file works on another machine. Files that are valid UTF-8 text (which includes a PDF that happens to be plain ASCII) go into `document_texts` (`name`, `text`) and every other file (PDF, Word, images, text that YAML cannot carry byte for byte, ...) into `document_files` (`name`, `mime`, `base64`). The case's `documents` list and these entries use bare file names, not your local paths (two different files that share a name become `report.pdf` and `2_report.pdf`); a file used by several cases keeps one name. Each file is limited to 10 MB; a larger one stops the export with an error naming it
 
-Provider settings, env var names, keys, run history and verdicts are **not** exported. On import, inline documents that do not exist at their original path are written under `<data dir>/documents/<harness name>/` and the case is repointed there. If the file has `accepted_outputs`, they become an accepted run for `accepted_model`; those restored outputs carry no check results, so their status is `manual`. Importing a name that exists fails unless you pass `--overwrite` (or confirm in the TUI). An imported harness may reference local document paths; when it runs, those files' contents are sent to the provider you run it against, so review a harness from someone else (its cases' document paths) before running it.
+Provider settings, env var names, keys, run history and verdicts are **not** exported. On import, inline documents (text or binary) are written under `<data dir>/documents/<harness name>/`, once per distinct file, and the cases are repointed there; a file with the same name in the directory you import from is never used instead. (Files exported by older versions carried absolute paths; an absolute path that exists on the importing machine is kept as it is.) If the file has `accepted_outputs`, they become an accepted run for `accepted_model`; those restored outputs carry no check results, so their status is `manual`. Importing a name that exists fails unless you pass `--overwrite` (or confirm in the TUI). An imported harness may reference local document paths; when it runs, those files' contents are sent to the provider you run it against, so review a harness from someone else (its cases' document paths) before running it.
 
 A second bundled example with two tiny cases is `summarize` ([source](src/promptharness/examples/summarize.harness.yaml)); `promptharness examples` lists everything bundled:
 
@@ -315,7 +457,7 @@ promptharness run summarize-example --model openai:gpt-4o-mini
 
 ## Where data lives
 
-Everything (providers, harnesses, runs, imported documents) is in one SQLite database, `promptharness.db`, in your platform's user data directory (via `platformdirs`; for example `~/Library/Application Support/promptharness` on macOS and `~/.local/share/promptharness` on Linux). Set `PROMPTHARNESS_HOME` to use a different directory, for a separate set of data or for throwaway experiments:
+Providers, harnesses and runs are in one SQLite database, `promptharness.db`, in your platform's user data directory (via `platformdirs`; for example `~/Library/Application Support/promptharness` on macOS and `~/.local/share/promptharness` on Linux). Documents restored by an import are files under `<data dir>/documents/<harness name>/`; the database only holds their paths. Set `PROMPTHARNESS_HOME` to use a different directory, for a separate set of data or for throwaway experiments:
 
 ```sh
 PROMPTHARNESS_HOME=/tmp/ph-scratch promptharness
@@ -323,7 +465,7 @@ PROMPTHARNESS_HOME=/tmp/ph-scratch promptharness
 
 ## Scope
 
-Network access happens only in requests to the provider base URLs you configure (chat completions and, for connection tests, model listing). Deliberately out of scope: cost tracking, the OpenAI Responses API (only chat completions are used), cloud sync, accounts and a web UI.
+Network access happens only in requests to the provider base URLs you configure (chat completions and, for connection tests, model listing). Deliberately out of scope: OCR (a scanned PDF must be attached as images), documents fetched from URLs, cost tracking, the OpenAI Responses API (only chat completions are used), cloud sync, accounts and a web UI.
 
 ## Development
 

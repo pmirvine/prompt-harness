@@ -100,6 +100,31 @@ async def test_chat_returns_text_usage_and_latency():
     assert init["max_retries"] == 2
 
 
+async def test_image_content_sent_unchanged_but_recorded_redacted():
+    import base64
+    import copy
+
+    png = b"\x89PNG\r\n\x1a\n" + b"\x07" * 64
+    b64 = base64.b64encode(png).decode()
+    msgs = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "look"},
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+            ],
+        }
+    ]
+    sent = copy.deepcopy(msgs)
+    r = await OpenAIChatClient().chat(provider(), "m", msgs, {})
+    assert FakeOpenAI.calls[0]["messages"] == sent
+    assert msgs == sent
+    assert b64 not in repr(r.request)
+    assert r.request["messages"][0]["content"][1]["image_url"]["url"] == (
+        f"data:image/png;base64,<{len(png)} bytes omitted>"
+    )
+
+
 async def test_provider_timeout_and_retries_override():
     await OpenAIChatClient().chat(
         provider(timeout=5, max_retries=0), "m", MSGS, {"temperature": 0}
@@ -317,3 +342,17 @@ async def test_normal_stop_has_no_warnings(monkeypatch):
     FakeOpenAI.script = [_completion("ok", finish_reason="stop", reasoning="thinking")]
     res = await OpenAIChatClient().chat(PROVIDER_NOKEY, "m", MSGS, PromptVersion(template="x"))
     assert res.warnings == []
+
+
+async def test_explicit_small_timeout_is_respected():
+    await OpenAIChatClient().chat(provider(timeout=0.5), "m", MSGS, {"temperature": 0})
+    init = FakeOpenAI.instances[0].init_kwargs
+    assert init["timeout"] == 0.5 and init["max_retries"] == 2
+
+
+def test_make_client_uses_stored_values_and_zero_is_not_replaced():
+    c = client_mod._make_client(provider(timeout=0.0, max_retries=0))
+    assert c.init_kwargs["timeout"] == 0.0
+    assert c.init_kwargs["max_retries"] == 0
+    c = client_mod._make_client(provider(timeout=300.0, max_retries=5))
+    assert (c.init_kwargs["timeout"], c.init_kwargs["max_retries"]) == (300.0, 5)

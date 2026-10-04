@@ -70,3 +70,87 @@ async def test_output_surrounding_whitespace_is_trimmed_for_the_judge():
     await run_judge(c, P, "m", "Be polite", "hi", "\n\n  hello there \n")
     user = c.calls[0]["messages"][1]["content"]
     assert user.endswith("Output:\nhello there")
+
+
+# --- documents and templated judge prompts ---------------------------------
+
+from promptharness.core.documents import Document  # noqa: E402
+
+_PNG = b"\x89PNG\r\n\x1a\n" + b"\x05" * 50
+_OK = '{"pass": true, "reason": "ok"}'
+
+
+def _docs():
+    return [
+        Document(name="a.txt", text="ALPHA TEXT", index=0),
+        Document(
+            name="p.png",
+            text="[attached image: p.png]",
+            kind="image",
+            mime="image/png",
+            index=1,
+            _data=_PNG,
+        ),
+    ]
+
+
+def _text_docs():
+    return [
+        Document(name="a.txt", text="ALPHA TEXT", index=0),
+        Document(name="b.txt", text="BETA TEXT", index=1),
+    ]
+
+
+async def test_documents_section_present_with_names_and_text():
+    c = FakeClient([_OK])
+    await run_judge(c, P, "m", "Be polite", "hi", "hello", _text_docs())
+    user = c.calls[0]["messages"][1]["content"]
+    assert "Documents:\n[0] a.txt\nALPHA TEXT\n\n[1] b.txt\nBETA TEXT\n\nOutput:" in user
+    order = [user.index(s) for s in ("Criteria:", "Input:", "Documents:", "Output:")]
+    assert order == sorted(order)
+
+
+async def test_no_documents_section_without_documents():
+    c = FakeClient([_OK])
+    await _run(c)
+    user = c.calls[0]["messages"][1]["content"]
+    assert user == "Criteria:\nBe polite\n\nInput:\nhi\n\nOutput:\nhello"
+
+
+async def test_images_are_attached_for_the_judge():
+    c = FakeClient([_OK])
+    await run_judge(c, P, "m", "Be polite", "hi", "hello", _docs())
+    content = c.calls[0]["messages"][1]["content"]
+    assert isinstance(content, list)
+    assert content[0]["type"] == "text" and "[1] p.png\n[attached image: p.png]" in content[0]["text"]
+    assert content[1]["type"] == "image_url"
+
+
+async def test_judge_prompt_can_reference_documents_by_the_configured_name():
+    c = FakeClient([_OK])
+    await run_judge(
+        c, P, "m", "Check {{ doc[1].name }} against {{ output }}", "hi", "hello",
+        _text_docs(), "doc",
+    )
+    user = c.calls[0]["messages"][1]["content"]
+    assert user.startswith("Criteria:\nCheck b.txt against hello\n\nInput:")
+
+
+async def test_plain_prompt_and_json_braces_render_unchanged():
+    c = FakeClient([_OK])
+    await run_judge(c, P, "m", 'Reply like {"pass": true}', "hi", "hello")
+    assert 'Criteria:\nReply like {"pass": true}\n\n' in c.calls[0]["messages"][1]["content"]
+
+
+@pytest.mark.parametrize("prompt", ["{{ nope }}", "literal {{ here", "{# no close", "a lone {% here"])
+async def test_template_error_is_judge_error(prompt):
+    c = FakeClient([_OK])
+    with pytest.raises(JudgeError, match="^judge prompt template error"):
+        await run_judge(c, P, "m", prompt, "hi", "hello")
+    assert c.calls == []
+
+
+async def test_raw_block_escapes():
+    c = FakeClient([_OK])
+    await run_judge(c, P, "m", "{% raw %}{{ ok }}{% endraw %}", "hi", "hello")
+    assert "Criteria:\n{{ ok }}\n\n" in c.calls[0]["messages"][1]["content"]

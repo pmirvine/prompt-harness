@@ -301,3 +301,36 @@ def test_delete_provider_removes_its_models(db):
     db.delete_provider("p")
     assert db.list_models("p") == []
     assert db.list_models("q") == ["b"]
+
+
+def test_migration_3_adds_column(tmp_path, monkeypatch):
+    p = tmp_path / "t.db"
+    with monkeypatch.context() as m:
+        m.setattr(dbmod, "MIGRATIONS", list(MIGRATIONS[:2]))
+        d = Database(p)
+        assert d.schema_version() == 2
+        d.conn.execute(
+            "INSERT INTO prompt_versions(hash, system, template) VALUES('abc','s','t')"
+        )
+        d.conn.execute("INSERT INTO harnesses(name, prompt_hash) VALUES('h','abc')")
+        d.conn.commit()
+        d.close()
+    d = Database(p)
+    assert d.schema_version() == len(MIGRATIONS)
+    assert len(MIGRATIONS) >= 3
+    h = d.get_harness("h")
+    assert h.prompt.documents_name == "documents"
+    d.close()
+
+
+def test_harness_roundtrip_keeps_documents_name(db):
+    h = _harness()
+    h.prompt = h.prompt.model_copy(update={"documents_name": "doc"})
+    db.save_harness(h)
+    assert db.get_harness("h") == h
+    h2 = _harness()
+    h2.name = "h2"
+    db.save_harness(h2)
+    n = db.conn.execute("SELECT COUNT(*) FROM prompt_versions").fetchone()[0]
+    assert n == 2
+    assert db.get_harness("h2").prompt.documents_name == "documents"

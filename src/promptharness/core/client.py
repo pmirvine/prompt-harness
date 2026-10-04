@@ -9,6 +9,7 @@ from typing import Any, Literal, Protocol
 import openai
 from openai import AsyncOpenAI
 
+from promptharness.core.messages import redact_images
 from promptharness.core.models import PromptVersion, Provider
 
 ErrorKind = Literal["auth", "timeout", "rate_limit", "config", "other"]
@@ -86,7 +87,7 @@ def _make_client(provider: Provider) -> AsyncOpenAI:
         base_url=provider.base_url,
         api_key=key,
         default_headers=provider.headers,
-        timeout=provider.timeout or 60,
+        timeout=provider.timeout if provider.timeout is not None else 60,
         max_retries=provider.max_retries if provider.max_retries is not None else 2,
     )
 
@@ -193,7 +194,7 @@ class OpenAIChatClient:
             request={
                 "base_url": provider.base_url,
                 "model": model,
-                "messages": messages,
+                "messages": redact_images(messages),
                 "params": call_params,
             },
             response=response,

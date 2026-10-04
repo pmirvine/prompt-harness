@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import keyword
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class ModelRef(BaseModel):
@@ -33,17 +34,40 @@ class Provider(BaseModel):
     max_retries: int | None = None
 
 
+_RESERVED_DOCUMENTS_NAMES = frozenset(
+    {"input", "output", "self", "true", "false", "none", "loop", "caller"}
+)
+
+
 class PromptVersion(BaseModel):
     system: str = ""
     template: str
     temperature: float | None = None
     max_tokens: int | None = None
     extra_params: dict[str, Any] = Field(default_factory=dict)
+    documents_name: str = "documents"
+
+    @field_validator("documents_name")
+    @classmethod
+    def _valid_documents_name(cls, v: str) -> str:
+        if not v or not v.isidentifier() or keyword.iskeyword(v):
+            raise ValueError(
+                f"documents_name must be a valid Python identifier and not a keyword: {v!r}"
+            )
+        if v in _RESERVED_DOCUMENTS_NAMES:
+            raise ValueError(
+                f"documents_name must not be a reserved template name "
+                f"({', '.join(sorted(_RESERVED_DOCUMENTS_NAMES))}): {v!r}"
+            )
+        return v
 
     @property
     def hash(self) -> str:
+        data = self.model_dump(mode="json")
+        if data["documents_name"] == "documents":
+            del data["documents_name"]  # keep hashes of existing prompts unchanged
         canonical = json.dumps(
-            self.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), ensure_ascii=False
+            data, sort_keys=True, separators=(",", ":"), ensure_ascii=False
         )
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:12]
 

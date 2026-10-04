@@ -71,6 +71,22 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def documents_line(summaries: object) -> str:
+    """`documents: a.txt (text) · b.pdf (text, 3 pages) · c.png (image)`, or ""."""
+    if not isinstance(summaries, list) or not summaries:
+        return ""
+    parts = []
+    for d in summaries:
+        if not isinstance(d, dict):
+            continue
+        detail = str(d.get("kind", "?"))
+        pages = d.get("pages")
+        if isinstance(pages, int):
+            detail += f", {pages} page" + ("" if pages == 1 else "s")
+        parts.append(f"{d.get('name', '?')} ({detail})")
+    return "documents: " + " · ".join(parts) if parts else ""
+
+
 def format_result(r: CaseResult, model: ModelRef) -> Text:
     t = Text()
     t.append(f"── {r.case_name} ", style="bold")
@@ -82,6 +98,9 @@ def format_result(r: CaseResult, model: ModelRef) -> Text:
         meta.append(f"tokens {r.prompt_tokens if r.prompt_tokens is not None else '?'} in"
                     f" / {r.completion_tokens if r.completion_tokens is not None else '?'} out")
     t.append("  " + "  ".join(meta), style="dim")
+    docs = documents_line(r.request.get("documents"))
+    if docs:
+        t.append("\n" + docs, style="dim")
     if r.output:
         t.append("\n" + r.output)
     for c in r.checks:

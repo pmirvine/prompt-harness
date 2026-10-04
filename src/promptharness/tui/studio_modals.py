@@ -43,7 +43,8 @@ class CaseForm(ModalScreen["Case | None"]):
             yield Input(c.name, id="case-name")
             yield Label("Input (available to the template as {{ input }})")
             yield TextArea(c.input, id="case-input")
-            yield Label("Document paths (comma-separated)")
+            yield Label("Document paths, comma-separated "
+                        "(text, PDF, Word, PowerPoint, Excel, OpenDocument, RTF, images)")
             yield Input(", ".join(c.documents), id="case-docs")
             yield Label("Must include (one per line)")
             yield TextArea("\n".join(m.pattern for m in e.must_include), id="must-include")

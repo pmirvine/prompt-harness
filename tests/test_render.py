@@ -66,3 +66,26 @@ def test_modelref_parse():
     with pytest.raises(ValueError):
         ModelRef.parse("nocolon")
     assert ModelRef.parse("or:meta/llama:free").model == "meta/llama:free"
+
+
+def test_render_with_custom_name():
+    docs = [Document(name="a.txt", text="A")]
+    assert render_user("{{ doc[0].text }}", "hi", docs, documents_name="doc") == "A"
+    with pytest.raises(TemplateRenderError, match="doc"):
+        render_user("{{ doc[0].text }}", "hi", docs)
+    with pytest.raises(TemplateRenderError, match="documents"):
+        render_user("{{ documents[0].text }}", "hi", docs, documents_name="doc")
+
+
+def test_render_passes_variables_as_dict():
+    docs = [Document(name="a.txt", text="A")]
+    assert render_user("{{ input }}{{ files[0].text }}", "hi", docs, "files") == "hiA"
+
+
+def test_render_template_shared_helper():
+    from promptharness.core.render import render_template
+
+    assert render_template("{{ a }}-{{ b }}", {"a": 1, "b": "x"}) == "1-x"
+    for bad in ("{{ nope }}", "{% if %}", "{# no close", "{%", "{{ ''.__class__.__mro__ }}"):
+        with pytest.raises(TemplateRenderError):
+            render_template(bad, {})

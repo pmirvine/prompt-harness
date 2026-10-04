@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from urllib.parse import urlsplit
 
 from textual import on, work
@@ -15,6 +16,32 @@ from promptharness.core.models import Provider
 
 
 MAX_TOKENS_PARAMS = ("max_tokens", "max_completion_tokens")
+
+
+def _blank_if_none(value: float | int | None) -> str:
+    return "" if value is None else str(value)
+
+
+def _parse_timeout(text: str) -> float | None:
+    """Blank -> None (the default); otherwise a finite number of seconds > 0."""
+    text = text.strip()
+    if not text:
+        return None
+    value = float(text)
+    if not (math.isfinite(value) and value > 0):
+        raise ValueError(text)
+    return value
+
+
+def _parse_retries(text: str) -> int | None:
+    """Blank -> None (the default); otherwise a whole number >= 0."""
+    text = text.strip()
+    if not text:
+        return None
+    value = int(text)
+    if value < 0:
+        raise ValueError(text)
+    return value
 
 
 class ProviderForm(ModalScreen["Provider | None"]):
@@ -36,13 +63,33 @@ class ProviderForm(ModalScreen["Provider | None"]):
             yield Label("API key env var NAME (blank for local servers)")
             yield Input(p.api_key_env if p else "", id="api_key_env",
                         placeholder="OPENAI_API_KEY")
-            yield Label("Token limit parameter")
-            yield Select(
-                [(v, v) for v in MAX_TOKENS_PARAMS],
-                value=p.max_tokens_param if p else "max_tokens",
-                allow_blank=False,
-                id="max_tokens_param",
-            )
+            with Horizontal(id="provider-limits"):
+                with Vertical(id="token-limit-col"):
+                    yield Label("Token limit parameter")
+                    yield Select(
+                        [(v, v) for v in MAX_TOKENS_PARAMS],
+                        value=p.max_tokens_param if p else "max_tokens",
+                        allow_blank=False,
+                        id="max_tokens_param",
+                    )
+                with Vertical(classes="limit-col"):
+                    yield Label("Timeout (s)")
+                    timeout = Input(
+                        _blank_if_none(p.timeout if p else None),
+                        id="timeout",
+                        placeholder="blank = 60",
+                    )
+                    timeout.tooltip = "Timeout (seconds, blank = 60)"
+                    yield timeout
+                with Vertical(classes="limit-col"):
+                    yield Label("Max retries")
+                    retries = Input(
+                        _blank_if_none(p.max_retries if p else None),
+                        id="max_retries",
+                        placeholder="blank = 2",
+                    )
+                    retries.tooltip = "Max retries (blank = 2)"
+                    yield retries
             with Horizontal(id="buttons"):
                 yield Button("Save", id="submit", variant="primary")
                 yield Button("Cancel", id="cancel")
@@ -61,16 +108,30 @@ class ProviderForm(ModalScreen["Provider | None"]):
             self.notify("Base URL must start with http:// or https:// and include a host",
                         severity="error")
             return
+        try:
+            timeout = _parse_timeout(self.query_one("#timeout", Input).value)
+        except ValueError:
+            self.notify("Timeout must be a number of seconds greater than 0 (or blank)",
+                        severity="error")
+            return
+        try:
+            retries = _parse_retries(self.query_one("#max_retries", Input).value)
+        except ValueError:
+            self.notify("Max retries must be a whole number, 0 or more (or blank)",
+                        severity="error")
+            return
         if self.existing is None and self.app.db.get_provider(name) is not None:  # type: ignore[attr-defined]
             self.notify(f"Provider {name!r} already exists", severity="error")
             return
         if self.existing is not None:
             result = self.existing.model_copy(
-                update={"base_url": url, "api_key_env": env, "max_tokens_param": mtp}
+                update={"base_url": url, "api_key_env": env, "max_tokens_param": mtp,
+                        "timeout": timeout, "max_retries": retries}
             )
         else:
             result = Provider(name=name, base_url=url, api_key_env=env,
-                              max_tokens_param=mtp)  # type: ignore[arg-type]
+                              max_tokens_param=mtp,  # type: ignore[arg-type]
+                              timeout=timeout, max_retries=retries)
         self.dismiss(result)
 
     @on(Button.Pressed, "#cancel")

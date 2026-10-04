@@ -133,7 +133,7 @@ async def test_judge_error_status_on_malformed_judge():
 async def test_judge_client_error_is_case_error():
     c = case(judge_prompt="good?")
     r, _ = await ev(c, ["hi", ClientError("auth", "no")], judge=(PROV, "j"))
-    assert r.status == "error" and r.error.startswith("auth: ")
+    assert r.status == "error" and r.error == "auth: judge request failed: no"
 
 
 async def test_concurrency_limit_respected():
@@ -208,7 +208,8 @@ async def test_results_record_request_tokens_latency():
     )
     r, _ = await ev(case(), [res])
     assert (r.prompt_tokens, r.completion_tokens, r.latency_ms) == (3, 4, 55)
-    assert r.request == {"k": 1} and r.response == {"r": 2} and r.warnings == ["w"]
+    assert r.request["k"] == 1 and r.response == {"r": 2} and r.warnings == ["w"]
+    assert r.request["documents"] == [] and r.request["messages"][-1]["content"] == "Say: hi"
 
 
 async def test_run_metadata():
@@ -287,3 +288,203 @@ async def test_unknown_only_case_raises():
     with pytest.raises(ValueError, match="unknown case 'zz'"):
         await run_harness(h, ModelRef(provider="p", model="m"), {"p": PROV}, client, only_case="zz")
     assert client.calls == []
+
+
+@pytest.mark.asyncio
+async def test_runner_uses_the_configured_name(tmp_path):
+    f = tmp_path / "d.txt"
+    f.write_text("DOCBODY")
+    c = Case(name="c", input="hi", documents=[str(f)])
+    ok = PromptVersion(template="{{ doc[0].text }}", documents_name="doc")
+    r, client = await ev(c, ["out"], prompt=ok)
+    assert "DOCBODY" in client.calls[0]["messages"][-1]["content"]
+    bad = PromptVersion(template="{{ documents[0].text }}", documents_name="doc")
+    r, _ = await ev(c, ["out"], prompt=bad)
+    assert r.status == "error"
+    assert "'documents' is undefined" in r.error
+
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"\x05" * 300
+
+
+def _png(tmp_path, name="pic.png"):
+    p = tmp_path / name
+    p.write_bytes(PNG)
+    return str(p)
+
+
+def _no_b64_payload(text):
+    import base64
+    import re
+
+    assert base64.b64encode(PNG).decode()[:40] not in text
+    for m in re.finditer(r"base64,([^\"'\\]*)", text):
+        assert m.group(1).startswith("<") and m.group(1).endswith("bytes omitted>"), m.group(0)
+
+
+async def test_image_case_sends_content_parts_and_stores_redacted_request(tmp_path):
+    import base64
+
+    seen = {}
+
+    def capture(provider, model, messages, params):
+        seen["messages"] = messages
+        return "ok"
+
+    c = Case(name="c", input="hi", documents=[_png(tmp_path)])
+    r, _ = await ev(c, [capture])
+    content = seen["messages"][-1]["content"]
+    assert content[0] == {"type": "text", "text": "Say: hi"}
+    url = content[1]["image_url"]["url"]
+    assert base64.b64decode(url.split(",", 1)[1]) == PNG
+    _no_b64_payload(repr(r.request))
+    assert r.request["messages"][-1]["content"][1]["image_url"]["url"] == (
+        f"data:image/png;base64,<{len(PNG)} bytes omitted>"
+    )
+    assert r.request["documents"] == [
+        {"name": "pic.png", "kind": "image", "mime": "image/png", "bytes": len(PNG)}
+    ]
+
+
+async def test_plain_case_request_is_unchanged(tmp_path):
+    f = tmp_path / "d.txt"
+    f.write_text("DOC")
+    prompt = PromptVersion(system="sys", template="{{ input }} {{ documents[0].text }}")
+    r, client = await ev(Case(name="c", input="hi", documents=[str(f)]), ["ok"], prompt=prompt)
+    sent = client.calls[0]["messages"]
+    assert sent == [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "hi DOC"},
+    ]
+    assert isinstance(sent[-1]["content"], str)
+    assert r.request["messages"] == sent
+    assert r.request["documents"] == [
+        {"name": "d.txt", "kind": "text", "mime": "text/plain", "chars": 3}
+    ]
+
+
+async def test_document_warnings_reach_the_result(tmp_path):
+    import docfixtures
+
+    f = tmp_path / "inv.pdf"
+    f.write_bytes(docfixtures.make_pdf(["Alpha", ""]))
+    r, _ = await ev(Case(name="c", input="hi", documents=[str(f)]), ["ok"])
+    assert "inv.pdf: page 2 has no extractable text" in r.warnings
+
+
+async def test_one_bad_document_does_not_stop_other_cases(tmp_path):
+    bad = tmp_path / "x.dat"
+    bad.write_bytes(b"\x00\x01\x02")
+    h = Harness(
+        name="h",
+        prompt=PROMPT,
+        cases=[
+            Case(name="a", input="x", documents=[str(bad)]),
+            case("b", must_include=[Match(pattern="ok")]),
+        ],
+    )
+    client = FakeClient(["ok"])
+    run = await run_harness(h, ModelRef(provider="p", model="m"), {"p": PROV}, client)
+    assert [r.status for r in run.results] == ["error", "pass"]
+    assert "binary" in run.results[0].error
+    assert len(client.calls) == 1
+
+
+async def test_non_vision_hint(tmp_path):
+    c = Case(name="c", input="hi", documents=[_png(tmp_path)])
+    r, _ = await ev(c, [ClientError("other", "400 bad request")])
+    assert r.status == "error"
+    assert r.error == "other: 400 bad request (the model may not support image input)"
+    r, _ = await ev(case(), [ClientError("other", "400 bad request")])
+    assert r.error == "other: 400 bad request"
+    r, _ = await ev(c, [ClientError("auth", "no key")])
+    assert r.error == "auth: no key"
+
+
+async def test_non_vision_judge_hint(tmp_path):
+    c = Case(
+        name="c",
+        input="hi",
+        documents=[_png(tmp_path)],
+        expectation=Expectation(judge_prompt="good?"),
+    )
+    r, _ = await ev(c, ["ok", ClientError("other", "400 bad request")], judge=(PROV, "j"))
+    assert r.status == "error"
+    assert r.error == (
+        "other: judge request failed: 400 bad request (the model may not support image input)"
+    )
+    r, _ = await ev(
+        case(judge_prompt="good?"), ["ok", ClientError("other", "400 bad request")],
+        judge=(PROV, "j"),
+    )
+    assert r.error == "other: judge request failed: 400 bad request"
+    r, _ = await ev(c, ["ok", ClientError("auth", "no key")], judge=(PROV, "j"))
+    assert r.error == "auth: judge request failed: no key"
+
+
+async def test_stored_run_has_no_base64(tmp_path):
+    from promptharness.core.db import Database
+
+    h = Harness(
+        name="h",
+        prompt=PROMPT,
+        cases=[Case(name="a", input="x", documents=[_png(tmp_path)])],
+    )
+    run = await run_harness(h, ModelRef(provider="p", model="m"), {"p": PROV}, FakeClient(["ok"]))
+    db = Database(tmp_path / "t.db")
+    try:
+        db.save_run(run)
+        rows = db.conn.execute("SELECT * FROM case_results").fetchall()
+        rows += db.conn.execute("SELECT * FROM runs").fetchall()
+        text = "\n".join(repr(tuple(row)) for row in rows)
+    finally:
+        db.close()
+    assert "bytes omitted" in text
+    _no_b64_payload(text)
+
+
+async def test_judge_receives_the_case_documents(tmp_path):
+    f = tmp_path / "d.txt"
+    f.write_text("DOCBODY")
+    c = Case(
+        name="c", input="hi", documents=[str(f)], expectation=Expectation(judge_prompt="good?")
+    )
+    r, client = await ev(c, ["out", '{"pass": true, "reason": "ok"}'], judge=(PROV, "j"))
+    assert r.status == "pass"
+    assert "DOCBODY" in client.calls[1]["messages"][-1]["content"]
+
+
+async def test_judge_template_error_gives_judge_error_status():
+    c = case(judge_prompt="{{ nope }}")
+    r, client = await ev(c, ["out"], judge=(PROV, "j"))
+    assert r.status == "judge_error"
+    assert any("judge prompt template error" in w for w in r.warnings)
+    assert len(client.calls) == 1
+
+
+async def test_document_loading_does_not_block_the_event_loop(tmp_path, monkeypatch):
+    import time
+
+    from promptharness.core import runner as runner_mod
+    from promptharness.core.render import load_documents as real_load
+
+    state = {"ticks": 0, "ticks_seen_by_loader": None}
+
+    def slow_load(paths):
+        time.sleep(0.3)
+        state["ticks_seen_by_loader"] = state["ticks"]
+        return real_load(paths)
+
+    monkeypatch.setattr(runner_mod, "load_documents", slow_load)
+
+    async def ticker():
+        for _ in range(100):
+            state["ticks"] += 1
+            await asyncio.sleep(0.01)
+
+    tick_task = asyncio.create_task(ticker())
+    await asyncio.sleep(0)
+    r, _ = await ev(case(), ["ok"])
+    tick_task.cancel()
+    assert r.status == "manual"
+    assert state["ticks_seen_by_loader"] >= 10, state

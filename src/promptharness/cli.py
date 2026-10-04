@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import textwrap
 from pathlib import Path
 from typing import Callable, Optional
@@ -236,6 +237,12 @@ def provider_add(
         "--max-tokens-param",
         help="Request field for the token limit: max_tokens (default) or max_completion_tokens",
     ),
+    timeout: Optional[float] = typer.Option(
+        None, "--timeout", help="Seconds to wait for each request (default 60)"
+    ),
+    max_retries: Optional[int] = typer.Option(
+        None, "--max-retries", help="Retries after a failed request (default 2)"
+    ),
 ) -> None:
     """Add a provider, or update an existing one (only the options given change).
 
@@ -246,12 +253,18 @@ def provider_add(
             f"invalid --max-tokens-param {max_tokens_param!r} "
             f"(expected {' or '.join(_MAX_TOKENS_PARAMS)})"
         )
+    if timeout is not None and not (math.isfinite(timeout) and timeout > 0):
+        raise _usage_error(f"invalid --timeout {timeout!r} (expected a number of seconds > 0)")
+    if max_retries is not None and max_retries < 0:
+        raise _usage_error(f"invalid --max-retries {max_retries!r} (expected 0 or more)")
     given = {
         k: v
         for k, v in {
             "base_url": base_url,
             "api_key_env": api_key_env,
             "max_tokens_param": max_tokens_param,
+            "timeout": timeout,
+            "max_retries": max_retries,
         }.items()
         if v is not None
     }

@@ -1031,3 +1031,111 @@ async def test_case_form_normalises_document_paths(tmp_path):
             str(tmp_path / "a.txt"),
         ]
     assert app.client.calls == []
+
+
+async def test_studio_output_wraps_to_the_pane_width_in_a_narrow_terminal(tmp_path):
+    # RichLog renders at least `min_width` (78 by default) columns wide, which is wider than
+    # the output pane in a 125-column terminal, so long results were cut off on the right.
+    db = make_db(tmp_path)
+    db.save_provider(Provider(name="p", base_url="https://p.test", api_key_env="K"))
+    db.save_models("p", ["m1"])
+    app = PromptHarnessApp(db=db, client=FakeClient(["word " * 60]))
+    async with app.run_test(size=(125, 40)) as pilot:
+        await pilot.press("2")
+        await pilot.pause()
+        app.query_one("#model", Select).value = "p:m1"
+        pane = app.query_one(StudioPane)
+        await pane.add_case(Case(name="c1", input="hi"))
+        app.query_one("#cases", ListView).focus()
+        await pilot.press("r")
+        await pilot.pause()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        log = app.query_one("#output", RichLog)
+        width = log.scrollable_content_region.width
+        assert log.lines
+        assert max(strip.cell_length for strip in log.lines) <= width
+
+
+async def _until(pilot, predicate, tries: int = 100) -> None:
+    for _ in range(tries):
+        if predicate():
+            return
+        await pilot.pause()
+    raise AssertionError("condition not reached")
+
+
+async def test_provider_form_sets_timeout_and_retries(tmp_path):
+    db = make_db(tmp_path)
+    app = PromptHarnessApp(db=db, client=FakeClient([]))
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.press("4", "a")
+        await _until(pilot, lambda: bool(app.screen.query("#timeout")))
+        await _fill(app, "lm", "http://localhost:1234/v1", "")
+        app.screen.query_one("#timeout", Input).value = "300"
+        app.screen.query_one("#max_retries", Input).value = "0"
+        await pilot.click("#submit")
+        await _until(pilot, lambda: db.get_provider("lm") is not None)
+        got = db.get_provider("lm")
+        assert (got.timeout, got.max_retries) == (300.0, 0)
+        await _until(pilot, lambda: not app.screen.query("#submit"))
+        # Blank means "use the default".
+        await pilot.press("a")
+        await _until(pilot, lambda: bool(app.screen.query("#timeout")))
+        await _fill(app, "other", "http://localhost:1/v1", "")
+        await pilot.click("#submit")
+        await _until(pilot, lambda: db.get_provider("other") is not None)
+        got = db.get_provider("other")
+        assert (got.timeout, got.max_retries) == (None, None)
+    assert app.client.calls == []
+
+
+async def test_provider_form_edit_prefills_timeout_and_preserves_other_fields(tmp_path):
+    db = make_db(tmp_path)
+    db.save_provider(Provider(name="acme", base_url="https://a.test", api_key_env="K1",
+                              enabled=False, timeout=5.0, max_retries=1, headers={"x": "y"}))
+    app = PromptHarnessApp(db=db, client=FakeClient([]))
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.press("4", "e")
+        await _until(pilot, lambda: bool(app.screen.query("#timeout")))
+        assert app.screen.query_one("#timeout", Input).value == "5.0"
+        assert app.screen.query_one("#max_retries", Input).value == "1"
+        app.screen.query_one("#timeout", Input).value = "120"
+        app.screen.query_one("#max_retries", Input).value = ""
+        await pilot.click("#submit")
+        await _until(pilot, lambda: db.get_provider("acme").timeout == 120.0)
+        got = db.get_provider("acme")
+        assert got.max_retries is None
+        assert got.enabled is False and got.headers == {"x": "y"} and got.api_key_env == "K1"
+    assert app.client.calls == []
+
+
+async def test_provider_form_rejects_bad_timeout_and_retries(tmp_path):
+    db = make_db(tmp_path)
+    app = PromptHarnessApp(db=db, client=FakeClient([]))
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.press("4", "a")
+        await _until(pilot, lambda: bool(app.screen.query("#timeout")))
+        await _fill(app, "lm", "http://localhost:1234/v1", "")
+        for field, bad in (("#timeout", "0"), ("#timeout", "-3"), ("#timeout", "abc"),
+                           ("#timeout", "nan"), ("#max_retries", "-1"), ("#max_retries", "2.5")):
+            app.screen.query_one("#timeout", Input).value = ""
+            app.screen.query_one("#max_retries", Input).value = ""
+            app.screen.query_one(field, Input).value = bad
+            app.clear_notifications()
+            app.screen.query_one("#submit").press()
+            await _until(pilot, lambda: len(app._notifications) > 0)
+            assert app.screen.query("#submit"), (field, bad)
+            assert db.get_provider("lm") is None, (field, bad)
+            word = "Timeout" if field == "#timeout" else "Max retries"
+            assert any(word in n.message for n in app._notifications), (field, bad)
+    assert app.client.calls == []
+
+
+async def test_provider_form_fits_in_80x24(tmp_path):
+    app = PromptHarnessApp(db=make_db(tmp_path), client=FakeClient([]))
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.press("4", "a")
+        await _until(pilot, lambda: bool(app.screen.query("#timeout")))
+        form = app.screen.query_one("#form").region
+        assert form.y >= 0 and form.bottom <= 24, form
