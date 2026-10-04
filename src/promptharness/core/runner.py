@@ -32,6 +32,13 @@ def _error_result(case: Case, error: str, **extra) -> CaseResult:
     return CaseResult(case_name=case.name, status="error", error=error, **extra)
 
 
+def _with_image_hint(e: ClientError, has_images: bool) -> ClientError:
+    """A server's client error for a request with images likely means no vision support."""
+    if has_images and e.kind == "other":
+        return ClientError("other", f"{e} (the model may not support image input)")
+    return e
+
+
 async def evaluate_case(
     case: Case,
     prompt: PromptVersion,
@@ -70,9 +77,10 @@ async def _evaluate(
     try:
         chat = await client.chat(provider, model, messages, prompt)
     except ClientError as e:
-        if has_images and e.kind == "other":
-            raise ClientError("other", f"{e} (the model may not support image input)") from e
-        raise
+        hinted = _with_image_hint(e, has_images)
+        if hinted is e:
+            raise
+        raise hinted from e
     # Redact here too: not every ChatClient redacts what it records.
     request = {
         **chat.request,
@@ -105,7 +113,8 @@ async def _evaluate(
             judge_error = True
             judge_warning = str(e)
         except ClientError as e:
-            error = f"{e.kind}: {e}"
+            hinted = _with_image_hint(e, has_images)
+            error = f"{hinted.kind}: {hinted}"
 
     return CaseResult(
         case_name=case.name,

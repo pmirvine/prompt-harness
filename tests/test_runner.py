@@ -401,6 +401,25 @@ async def test_non_vision_hint(tmp_path):
     assert r.error == "auth: no key"
 
 
+async def test_non_vision_judge_hint(tmp_path):
+    c = Case(
+        name="c",
+        input="hi",
+        documents=[_png(tmp_path)],
+        expectation=Expectation(judge_prompt="good?"),
+    )
+    r, _ = await ev(c, ["ok", ClientError("other", "400 bad request")], judge=(PROV, "j"))
+    assert r.status == "error"
+    assert r.error == "other: 400 bad request (the model may not support image input)"
+    r, _ = await ev(
+        case(judge_prompt="good?"), ["ok", ClientError("other", "400 bad request")],
+        judge=(PROV, "j"),
+    )
+    assert r.error == "other: 400 bad request"
+    r, _ = await ev(c, ["ok", ClientError("auth", "no key")], judge=(PROV, "j"))
+    assert r.error == "auth: no key"
+
+
 async def test_stored_run_has_no_base64(tmp_path):
     from promptharness.core.db import Database
 
