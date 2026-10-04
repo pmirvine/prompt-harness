@@ -7,6 +7,22 @@ from promptharness.core.documents import ReadError, ReadResult, register
 
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+MAX_OOXML_UNCOMPRESSED_BYTES = 100 * 1024 * 1024
+
+
+def check_ooxml_size(data: bytes, kind: str) -> None:
+    """Reject a non-zip, or a zip whose declared uncompressed size is over the limit.
+
+    Called before python-docx / python-pptx / openpyxl see the data, so a small file
+    that would inflate to gigabytes (a zip bomb) is refused without decompressing it.
+    """
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            total = sum(info.file_size for info in z.infolist())
+    except (zipfile.BadZipFile, ValueError, OSError) as e:
+        raise ReadError(f"not a valid {kind} file") from e
+    if total > MAX_OOXML_UNCOMPRESSED_BYTES:
+        raise ReadError("file is too large when decompressed")
 
 
 @register(".pdf")
@@ -45,6 +61,7 @@ def _row_text(cells) -> str:
 def read_docx(data: bytes, name: str) -> ReadResult:
     if not zipfile.is_zipfile(io.BytesIO(data)):
         raise ReadError("not a valid .docx file")
+    check_ooxml_size(data, ".docx")
     import docx
     from docx.table import Table
 
@@ -75,6 +92,7 @@ def _walk_shapes(shapes):
 def read_pptx(data: bytes, name: str) -> ReadResult:
     if not zipfile.is_zipfile(io.BytesIO(data)):
         raise ReadError("not a valid .pptx file")
+    check_ooxml_size(data, ".pptx")
     from pptx import Presentation
 
     try:

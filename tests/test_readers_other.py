@@ -294,3 +294,85 @@ def test_doc_converter_runs_with_errors_replace(tmp_path, monkeypatch):
     monkeypatch.setattr(readers_other.subprocess, "run", run)
     _load(tmp_path, "a.doc", b"x")
     assert seen["errors"] == "replace" and seen["text"] is True
+
+
+# ---- fix wave: ODS empty repeats, LibreOffice profile, zip-bomb guard ----
+
+
+def test_ods_inner_empty_repeated_cells_keep_columns(tmp_path):
+    d = _load(tmp_path, "r.ods", _ods(_r(_c("a") + _c(None, 3) + _c("b"))))
+    assert d.text == "--- sheet S ---\na\t\t\t\tb"
+
+
+def test_ods_inner_empty_repeated_rows_keep_position(tmp_path):
+    d = _load(tmp_path, "r.ods", _ods(_r(_c("a")) + _r(_c(None), 3) + _r(_c("b"))))
+    assert d.text == "--- sheet S ---\na\n\n\n\nb"
+
+
+def test_ods_inner_empty_repeats_are_capped(tmp_path, monkeypatch):
+    monkeypatch.setattr(readers_other, "MAX_REPEAT", 2)
+    d = _load(tmp_path, "r.ods", _ods(_r(_c("a") + _c(None, 50) + _c("b")) + _r(_c(None), 50)
+                                      + _r(_c("c"))))
+    assert d.text == "--- sheet S ---\na\t\t\tb\n\n\nc"
+
+
+def test_ods_trailing_empty_cells_after_inner_gap_are_free(tmp_path):
+    rows = (_r(_c("a") + _c(None, 2) + _c("b") + _c(None, 1048576))
+            + _r(_c(None, 1048576), 1048576))
+    t = time.monotonic()
+    d = _load(tmp_path, "r.ods", _ods(rows))
+    assert time.monotonic() - t < 1
+    assert d.text == "--- sheet S ---\na\t\t\tb"
+
+
+def test_doc_soffice_uses_a_private_profile(tmp_path, monkeypatch):
+    seen = []
+
+    def run(cmd, **kw):
+        seen.append(cmd)
+        outdir = Path(cmd[cmd.index("--outdir") + 1])
+        (outdir / (Path(cmd[-1]).stem + ".txt")).write_text("converted", encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(readers_other.shutil, "which", _which("soffice"))
+    monkeypatch.setattr(readers_other.subprocess, "run", run)
+    assert _load(tmp_path, "a.doc", b"x").text == "converted"
+    (cmd,) = seen
+    envs = [a for a in cmd if a.startswith("-env:UserInstallation=")]
+    assert len(envs) == 1
+    uri = envs[0].split("=", 1)[1]
+    assert uri.startswith("file:///") and uri.endswith("/lo")
+    outdir = Path(cmd[cmd.index("--outdir") + 1])
+    assert uri == (outdir.parent / "lo").as_uri()
+    assert cmd.index(envs[0]) < cmd.index("--convert-to")
+
+
+def _inflate(data: bytes, extra: int) -> bytes:
+    """Add a highly compressible member: small on disk, large when decompressed."""
+    import io
+    import zipfile
+    buf = io.BytesIO(data)
+    with zipfile.ZipFile(buf, "a", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("customXml/padding.bin", b"\x00" * extra)
+    return buf.getvalue()
+
+
+@pytest.mark.parametrize("name,make", [
+    ("a.docx", lambda: docfixtures.make_docx(["hello docx"])),
+    ("a.pptx", lambda: docfixtures.make_pptx([{"title": "hello pptx"}])),
+    ("a.xlsx", lambda: docfixtures.make_xlsx({"S": [["hello xlsx"]]})),
+])
+def test_ooxml_zip_bomb_is_rejected_before_parsing(tmp_path, monkeypatch, name, make):
+    from promptharness.core import readers_office
+    monkeypatch.setattr(readers_office, "MAX_OOXML_UNCOMPRESSED_BYTES", 1024 * 1024)
+    normal = make()
+    assert "hello" in _load(tmp_path, name, normal).text
+    bomb = _inflate(normal, 2 * 1024 * 1024)
+    assert len(bomb) < 100 * 1024
+    with pytest.raises(DocumentError, match="too large when decompressed"):
+        _load(tmp_path, name, bomb)
+
+
+def test_ooxml_limit_default_is_100_mb():
+    from promptharness.core import readers_office
+    assert readers_office.MAX_OOXML_UNCOMPRESSED_BYTES == 100 * 1024 * 1024

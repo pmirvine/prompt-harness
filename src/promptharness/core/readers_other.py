@@ -6,10 +6,12 @@ import shutil
 import subprocess
 import tempfile
 import zipfile
+from pathlib import Path
 from xml.etree import ElementTree as ET
 from xml.parsers import expat
 
 from promptharness.core.documents import ReadError, ReadResult, register
+from promptharness.core.readers_office import check_ooxml_size
 
 MAX_SHEET_ROWS = 5000
 MAX_ODF_XML_BYTES = 50 * 1024 * 1024
@@ -57,6 +59,7 @@ def _sheet_block(title: str, rows, name: str, warnings: list[str]) -> str:
 def read_xlsx(data: bytes, name: str) -> ReadResult:
     if not zipfile.is_zipfile(io.BytesIO(data)):
         raise ReadError("not a valid .xlsx file")
+    check_ooxml_size(data, ".xlsx")
     import openpyxl
 
     wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
@@ -194,26 +197,33 @@ def _repeat(el: ET.Element, attr: str) -> int:
 
 
 def _ods_rows(tbl: ET.Element):
-    """Yield rows, expanding repeats of non-empty cells/rows (capped at MAX_REPEAT).
+    """Yield rows, expanding repeated cells and rows (each repeat capped at MAX_REPEAT).
 
-    Repeats of empty cells/rows are not expanded and trailing empties are dropped.
+    Empty cells and rows are only emitted when something follows them, so inner gaps
+    keep later columns and rows in place while trailing empties (often repeated to the
+    sheet's full size) cost nothing.
     """
-    pending_blank = 0
+    pending_rows = 0
     for row in tbl.iter(_q("table", "table-row")):
         cells: list[str] = []
+        pending_cells = 0
         for cell in row.findall(_q("table", "table-cell")):
             text = "\n".join(_para_text(p) for p in cell.findall(_q("text", "p")))
-            n = min(_repeat(cell, "number-columns-repeated"), MAX_REPEAT) if text else 1
+            n = min(_repeat(cell, "number-columns-repeated"), MAX_REPEAT)
+            if not text:
+                pending_cells += n
+                continue
+            cells.extend([""] * pending_cells)
+            pending_cells = 0
             cells.extend([text] * n)
-        while cells and not cells[-1]:
-            cells.pop()
+        rows = min(_repeat(row, "number-rows-repeated"), MAX_REPEAT)
         if not cells:
-            pending_blank += 1
+            pending_rows += rows
             continue
-        for _ in range(pending_blank):
+        for _ in range(pending_rows):
             yield []
-        pending_blank = 0
-        for _ in range(min(_repeat(row, "number-rows-repeated"), MAX_REPEAT)):
+        pending_rows = 0
+        for _ in range(rows):
             yield cells
 
 
@@ -279,7 +289,10 @@ def read_doc(data: bytes, name: str) -> ReadResult:
         else:
             outdir = os.path.join(tmp, "out")
             os.mkdir(outdir)
-            _run([office, "--headless", "--convert-to", "txt:Text", "--outdir", outdir, src])
+            # A private profile, so concurrent conversions do not fight over one.
+            profile = Path(tmp, "lo").as_uri()
+            _run([office, f"-env:UserInstallation={profile}", "--headless",
+                  "--convert-to", "txt:Text", "--outdir", outdir, src])
             out = os.path.join(outdir, "input.txt")
             if not os.path.exists(out):
                 raise ReadError("conversion produced no output")

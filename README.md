@@ -384,6 +384,7 @@ A document problem never stops a run: the case that uses the document ends with 
 - **Scanned PDFs** have no text to extract. A page without text gives the warning `NAME: page N has no extractable text`; a PDF with no text on any page is an error (`no extractable text; it may be a scan. Convert the pages to images and attach those`). There is no OCR.
 - **Encrypted PDFs** are opened with an empty password if possible; otherwise they are an error (`password-protected`). AES-encrypted PDFs also need the `cryptography` package, which is not installed with PromptHarness.
 - **Images** larger than 20 MB, and image types other than PNG, JPEG, GIF and WebP (such as `.bmp`, `.tif`, `.heic` or `.svg`), are errors.
+- **Word, PowerPoint and Excel** (`.docx`, `.pptx`, `.xlsx`) files that would unpack to more than 100 MB are rejected with `file is too large when decompressed`.
 - **OpenDocument** files whose `content.xml` is larger than 50 MB, or that contain DTD or entity declarations, are rejected.
 - **Legacy `.doc`** files need `antiword` or LibreOffice, as described in the [formats table](#formats).
 - **Embedded images** inside PDF, Word, PowerPoint, spreadsheet and OpenDocument files are not extracted; only their text is read. Attach an image file to show the model a picture.
