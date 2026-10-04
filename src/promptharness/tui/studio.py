@@ -37,6 +37,22 @@ from promptharness.tui.studio_support import (
 __all__ = ["PromptHistory", "StudioPane"]
 
 DEFAULT_TEMPLATE = "{{ input }}"
+
+
+def _template_label(documents_name: str) -> str:
+    return f"User template (Jinja2: input, {documents_name})"
+
+
+def _valid_documents_name(raw: str) -> str:
+    """The name the template will see: `raw` if valid, otherwise the default."""
+    name = raw.strip()
+    if not name:
+        return "documents"
+    try:
+        PromptVersion(template="", documents_name=name)
+    except ValidationError:
+        return "documents"
+    return name
 HINT = ("Tab to cases: n new · x delete · enter edit · r run · R run all · v verdict · s save"
         "  |  anywhere: ctrl+r run · ctrl+s save · alt+←/→ prompt history"
         " (ctrl+z/y outside editors)")
@@ -93,14 +109,16 @@ class StudioPane(StudioPersistMixin, Widget):
             yield Select([], prompt="Judge", id="judge", tooltip="Judge model (optional)")
             yield Input(placeholder="temp", id="temperature", tooltip="Temperature")
             yield Input(placeholder="max tok", id="max_tokens", tooltip="Max tokens")
-            yield Label("Docs as", id="documents-name-label")
-            yield Input(placeholder="documents", id="documents_name",
-                        tooltip="Template variable holding the case's documents")
+            docs_as = Input(placeholder="documents", id="documents_name",
+                            tooltip="Docs as: the template variable holding the case's "
+                                    "documents (blank = documents)")
+            docs_as.border_title = "Docs as"
+            yield docs_as
         with Horizontal(id="studio-body"):
             with Vertical(id="studio-editors"):
                 yield Label("System prompt")
                 yield TextArea("", id="system")
-                yield Label("User template (Jinja2: input, documents)")
+                yield Label(_template_label("documents"), id="template-label")
                 yield TextArea(DEFAULT_TEMPLATE, id="template")
             with Vertical(id="studio-side"):
                 yield Label(HINT, id="studio-hint")
@@ -222,6 +240,12 @@ class StudioPane(StudioPersistMixin, Widget):
         if p is not None:
             self.history.push(p)
 
+    @on(Input.Changed, "#documents_name")
+    def _update_template_label(self) -> None:
+        raw = self.query_one("#documents_name", Input).value
+        self.query_one("#template-label", Label).update(
+            _template_label(_valid_documents_name(raw)))
+
     @on(TextArea.Changed, "#system, #template")
     @on(Input.Changed, "#temperature, #max_tokens, #documents_name")
     def _edited(self) -> None:
@@ -241,6 +265,8 @@ class StudioPane(StudioPersistMixin, Widget):
             p.max_tokens)
         self.query_one("#documents_name", Input).value = (
             "" if p.documents_name == "documents" else p.documents_name)
+        # Callers may suppress Input.Changed (loading a harness), so update directly.
+        self._update_template_label()
 
     def _step(self, forward: bool) -> None:
         if self._edit_timer is not None:

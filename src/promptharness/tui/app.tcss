@@ -20,8 +20,7 @@ StudioPane { height: 1fr; }
 #manual-model { width: 18; }
 #temperature { width: 10; }
 #max_tokens { width: 13; }
-#documents-name-label { width: auto; padding: 1 0 0 1; color: #8a93a3; }
-#documents_name { width: 15; }
+#documents_name { width: 13; border-title-color: #8a93a3; }
 #studio-body { height: 1fr; }
 #studio-editors { width: 1fr; }
 #studio-editors Label, #studio-side Label { color: #8a93a3; }

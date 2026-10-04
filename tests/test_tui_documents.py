@@ -192,3 +192,46 @@ def test_format_result_documents_line_kinds():
     assert lines[1] == "documents: a.txt (text) · one.pdf (text, 1 page) · c.png (image)"
     r = CaseResult(case_name="c", status="manual", output="out", request={"documents": []})
     assert "documents:" not in format_result(r, ModelRef.parse("p:m")).plain
+
+
+def _template_label(app) -> str:
+    return str(app.query_one("#template-label", Label).content)
+
+
+async def test_template_label_follows_the_docs_as_name(tmp_path):
+    app = PromptHarnessApp(db=make_db(tmp_path), client=FakeClient([]))
+    async with app.run_test() as pilot:
+        pane = await open_studio(app, pilot)
+        assert _template_label(app) == "User template (Jinja2: input, documents)"
+        name = app.query_one("#documents_name", Input)
+        name.value = "doc"
+        await until(pilot, lambda: _template_label(app) == "User template (Jinja2: input, doc)")
+        for bad in ("not valid", "input", "class", ""):
+            name.value = bad
+            await until(pilot, lambda: _template_label(app)
+                        == "User template (Jinja2: input, documents)")
+        h = Harness(name="h", prompt=PromptVersion(template="{{ files }}", documents_name="files"),
+                    cases=[Case(name="c1")])
+        await pane.load_harness(h, None)
+        await until(pilot, lambda: _template_label(app)
+                    == "User template (Jinja2: input, files)")
+        await pane.load_harness(Harness(name="d", prompt=PromptVersion(template="x"), cases=[]),
+                                None)
+        await until(pilot, lambda: _template_label(app)
+                    == "User template (Jinja2: input, documents)")
+    assert app.client.calls == []
+
+
+async def test_top_row_fits_model_and_judge_selects_at_80_columns(tmp_path):
+    for width, minimum in ((80, 12), (100, 17), (125, 29)):
+        app = PromptHarnessApp(db=make_db(tmp_path), client=FakeClient([]))
+        async with app.run_test(size=(width, 24)) as pilot:
+            await open_studio(app, pilot)
+            model = app.query_one("#model", Select).region
+            judge = app.query_one("#judge", Select).region
+            assert model.width >= minimum and judge.width >= minimum, (width, model, judge)
+            top = app.query_one("#studio-top").region
+            assert max(w.region.right for w in app.query_one("#studio-top").children) <= top.right
+            name = app.query_one("#documents_name", Input)
+            assert name.region.width >= 13
+            assert "Docs as" in str(name.border_title or "") + str(name.tooltip or "")
