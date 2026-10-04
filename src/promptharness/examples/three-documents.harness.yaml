@@ -1,0 +1,143 @@
+format_version: 1
+name: three-documents
+description: 'Three text invoices attached to every case: sum their totals, find the
+  earliest due date and pick the largest invoice.'
+prompt:
+  system: You are a precise assistant. Answer exactly as asked, using only the documents
+    provided.
+  template: '{{ input }}
+
+
+    Invoice A ({{ documents[0].name }}):
+
+    {{ documents[0].text }}
+
+
+    Invoice B ({{ documents[1].name }}):
+
+    {{ documents[1].text }}
+
+
+    Invoice C ({{ documents[2].name }}):
+
+    {{ documents[2].text }}'
+  temperature: 0.0
+  max_tokens: 2048
+  extra_params: {}
+cases:
+- name: total-and-due-date
+  input: Reply with only a JSON object with the keys "total" (number, the sum of all
+    three invoice totals in EUR) and "earliest_due" (string, the earliest due date
+    as YYYY-MM-DD).
+  documents:
+  - invoice-1041.txt
+  - invoice-1042.txt
+  - invoice-1043.txt
+  notes: Sum is 400.50 EUR and the earliest due date is 2026-11-01.
+  expectation:
+    must_include:
+    - pattern: '"earliest_due"\s*:\s*"2026-11-01"'
+      regex: true
+    - pattern: 400\.5
+      regex: true
+    must_not_include: []
+    exact: null
+    normalized: null
+    json_output: true
+    json_schema:
+      type: object
+      required:
+      - total
+      - earliest_due
+      properties:
+        total:
+          type: number
+        earliest_due:
+          type: string
+          pattern: ^\d{4}-\d{2}-\d{2}$
+    judge_prompt: null
+  document_texts:
+  - name: invoice-1041.txt
+    text: 'Invoice 1041
+
+      Supplier: ACME Supplies
+
+      Total: 120.00 EUR
+
+      Due date: 2026-11-01
+
+      '
+  - name: invoice-1042.txt
+    text: 'Invoice 1042
+
+      Supplier: Borealis Ltd
+
+      Total: 80.50 EUR
+
+      Due date: 2026-11-15
+
+      '
+  - name: invoice-1043.txt
+    text: 'Invoice 1043
+
+      Supplier: Cobalt GmbH
+
+      Total: 200.00 EUR
+
+      Due date: 2026-12-01
+
+      '
+- name: largest-invoice
+  input: Which invoice has the largest total? Reply with only the invoice number.
+  documents:
+  - invoice-1041.txt
+  - invoice-1042.txt
+  - invoice-1043.txt
+  notes: Invoice 1043 (200.00 EUR) is the largest.
+  expectation:
+    must_include:
+    - pattern: '1043'
+      regex: false
+    must_not_include:
+    - pattern: '1041'
+      regex: false
+    - pattern: '1042'
+      regex: false
+    exact: null
+    normalized: null
+    json_output: false
+    json_schema: null
+    judge_prompt: 'The answer must name the invoice with the highest total among these
+      documents: {{ documents[0].name }}, {{ documents[1].name }} and {{ documents[2].name
+      }}.'
+  document_texts:
+  - name: invoice-1041.txt
+    text: 'Invoice 1041
+
+      Supplier: ACME Supplies
+
+      Total: 120.00 EUR
+
+      Due date: 2026-11-01
+
+      '
+  - name: invoice-1042.txt
+    text: 'Invoice 1042
+
+      Supplier: Borealis Ltd
+
+      Total: 80.50 EUR
+
+      Due date: 2026-11-15
+
+      '
+  - name: invoice-1043.txt
+    text: 'Invoice 1043
+
+      Supplier: Cobalt GmbH
+
+      Total: 200.00 EUR
+
+      Due date: 2026-12-01
+
+      '

@@ -74,13 +74,13 @@ def test_examples_are_bundled_inside_the_package():
 
 def test_list_examples_names_and_descriptions():
     infos = list_examples()
-    assert [i.name for i in infos] == ["quickstart", "summarize"]
+    assert [i.name for i in infos] == ["mixed-formats", "quickstart", "summarize", "three-documents"]
     assert all(i.description.strip() for i in infos)
     # Descriptions come from the harness files, with folded YAML whitespace collapsed.
-    assert "\n" not in infos[0].description
+    assert all("\n" not in i.description for i in infos)
 
 
-@pytest.mark.parametrize("name", ["quickstart", "summarize"])
+@pytest.mark.parametrize("name", ["quickstart", "summarize", "three-documents", "mixed-formats"])
 def test_every_bundled_example_parses_and_imports(db, name):
     harness, _ = parse_harness(read_example(name))
     assert harness.cases
@@ -98,3 +98,137 @@ def test_unknown_example_lists_the_available_ones():
 def test_example_names_cannot_escape_the_examples_folder(bad):
     with pytest.raises(ExampleError):
         read_example(bad)
+
+
+# ---- document examples -------------------------------------------------------
+
+import json  # noqa: E402
+import sys  # noqa: E402
+
+import yaml  # noqa: E402
+
+from promptharness.core.documents import load_documents  # noqa: E402
+from promptharness.core.render import render_user  # noqa: E402
+
+ROOT = Path(__file__).resolve().parent.parent
+SAMPLES = ROOT / "docs" / "sample-documents"
+EXAMPLES_DIR = ROOT / "src" / "promptharness" / "examples"
+DOC_EXAMPLES = ["three-documents", "mixed-formats"]
+GOOD_JSON = '{"total": 400.5, "earliest_due": "2026-11-01"}'
+BAD_JSON = ['{"total": 300.0, "earliest_due": "2026-11-01"}', '{"total": 400.5, "earliest_due": "2026-11-15"}']
+
+
+def _import(db, name):
+    h = import_harness(db, read_example(name))
+    return db.get_harness(h.name)
+
+
+def _case(h, name):
+    return next(c for c in h.cases if c.name == name)
+
+
+def test_three_documents_example_parses_and_imports(db):
+    h = _import(db, "three-documents")
+    assert h.accepted_model is None
+    for c in h.cases:
+        docs = load_documents(c.documents)
+        assert [d.kind for d in docs] == ["text"] * 3
+        for d, n in zip(docs, ("1041", "1042", "1043")):
+            assert n in d.text
+        out = render_user(h.prompt.template, c.input, docs)
+        pos = [out.index(d.text) for d in docs]
+        assert pos == sorted(pos)
+        assert all(d.name in out for d in docs)
+    assert "documents[0]" in h.prompt.template and "documents[2]" in h.prompt.template
+
+
+def test_mixed_formats_example_restores_binary_documents(db):
+    h = _import(db, "mixed-formats")
+    docs = load_documents(_case(h, "total-and-due-date").documents)
+    assert [d.kind for d in docs] == ["text", "text", "image"]
+    assert "1041" in docs[0].text and "1042" in docs[1].text
+    assert docs[2].mime == "image/png"
+    out = render_user(h.prompt.template, "q", docs)
+    assert "Document 3: invoice-1043.png" in out
+
+
+@pytest.mark.parametrize(
+    "example,case,good,bads",
+    [
+        ("three-documents", "total-and-due-date", GOOD_JSON, BAD_JSON),
+        ("mixed-formats", "total-and-due-date", GOOD_JSON, BAD_JSON),
+        ("three-documents", "largest-invoice", "1043", ["1041", "The answer is 1042"]),
+    ],
+)
+def test_document_checks_accept_good_and_reject_bad_answers(example, case, good, bads):
+    harness, _ = parse_harness(read_example(example))
+    exp = _case(harness, case).expectation
+    res = run_checks(good, exp)
+    assert res and all(r.passed for r in res), res
+    for bad in bads:
+        assert any(not r.passed for r in run_checks(bad, exp)), bad
+
+
+def test_largest_invoice_judge_prompt_names_all_documents():
+    harness, _ = parse_harness(read_example("three-documents"))
+    jp = _case(harness, "largest-invoice").expectation.judge_prompt
+    for i in range(3):
+        assert "{{ documents[%d].name }}" % i in jp
+
+
+def test_sample_documents_are_readable():
+    docs = load_documents([str(SAMPLES / n) for n in ("invoice-1041.docx", "invoice-1042.pdf", "invoice-1043.png")])
+    assert [d.kind for d in docs] == ["text", "text", "image"]
+    assert "1041" in docs[0].text and "1042" in docs[1].text
+
+
+def _split(text):
+    data = yaml.safe_load(text)
+    texts, files = {}, {}
+    for c in data["cases"]:
+        texts[c["name"]] = {t["name"]: t["text"] for t in c.pop("document_texts", [])}
+        files[c["name"]] = {f["name"]: f for f in c.pop("document_files", [])}
+        c["documents"] = [n for n in c["documents"]]
+    return data, texts, files
+
+
+def _loaded(tmp_path, tag, f):
+    import base64
+
+    p = tmp_path / tag / f["name"]
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(base64.b64decode(f["base64"]))
+    d = load_documents([str(p)])[0]
+    return (d.kind, d.mime, d.text if d.kind == "text" else None)
+
+
+@pytest.mark.parametrize("name", DOC_EXAMPLES)
+def test_build_script_output_matches_committed_files(tmp_path, name):
+    import build_document_examples as b
+
+    b.build(tmp_path / "out", tmp_path / "samples")
+    new, ntexts, nfiles = _split((tmp_path / "out" / f"{name}.harness.yaml").read_text("utf-8"))
+    old, otexts, ofiles = _split((EXAMPLES_DIR / f"{name}.harness.yaml").read_text("utf-8"))
+    assert new == old
+    assert ntexts == otexts
+    assert {c: {n: f["mime"] for n, f in d.items()} for c, d in nfiles.items()} == {
+        c: {n: f["mime"] for n, f in d.items()} for c, d in ofiles.items()
+    }
+    for case in nfiles:
+        for n in nfiles[case]:
+            assert _loaded(tmp_path, "n", nfiles[case][n]) == _loaded(tmp_path, "o", ofiles[case][n])
+    for fn in ("invoice-1041.docx", "invoice-1042.pdf", "invoice-1043.png"):
+        a = load_documents([str(tmp_path / "samples" / fn)])[0]
+        c = load_documents([str(SAMPLES / fn)])[0]
+        assert (a.kind, a.mime, a.text if a.kind == "text" else None) == (
+            c.kind, c.mime, c.text if c.kind == "text" else None)
+
+
+@pytest.mark.parametrize("name", DOC_EXAMPLES)
+def test_committed_examples_contain_no_local_paths(name):
+    data = yaml.safe_load(read_example(name))
+    for c in data["cases"]:
+        for n in c["documents"]:
+            assert "/" not in n and "\\" not in n and "tmp" not in n.lower()
+        for t in [*c.get("document_texts", []), *c.get("document_files", [])]:
+            assert "/" not in t["name"] and "tmp" not in t["name"].lower()

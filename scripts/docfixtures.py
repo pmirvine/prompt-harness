@@ -185,3 +185,18 @@ def make_odp(slides: list[list[str]]) -> bytes:
         f"<office:presentation>{pages}</office:presentation>",
         "application/vnd.oasis.opendocument.presentation",
     )
+
+
+def make_png(lines: list[str]) -> bytes:
+    """Small white PNG with the lines drawn in black (large enough for a vision model)."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    font = ImageFont.load_default(size=28)
+    line_h = 40
+    img = Image.new("RGB", (640, 24 + line_h * len(lines)), "white")
+    draw = ImageDraw.Draw(img)
+    for i, line in enumerate(lines):
+        draw.text((20, 16 + i * line_h), line, fill="black", font=font)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG", optimize=True)
+    return buf.getvalue()

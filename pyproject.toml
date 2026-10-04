@@ -30,7 +30,11 @@ dependencies = [
 promptharness = "promptharness.cli:app"
 
 [dependency-groups]
-dev = ["pytest>=9", "pytest-asyncio>=1"]
+dev = [
+    "pillow>=12.3.0",
+    "pytest>=9",
+    "pytest-asyncio>=1",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/promptharness"]
