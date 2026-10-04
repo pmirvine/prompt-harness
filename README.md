@@ -390,7 +390,7 @@ A document problem never stops a run: the case that uses the document ends with 
 
 ### Sharing harnesses with documents
 
-`promptharness export NAME --inline-documents` embeds each case's documents in the file, binary ones included (each file at most 10 MB), and importing the file on another machine restores any that are missing there under the data directory. See [Export and import](#export-and-import).
+`promptharness export NAME --inline-documents` embeds each case's documents in the file, binary ones included (each file at most 10 MB), and importing the file restores them under the data directory. See [Export and import](#export-and-import).
 
 ### Examples
 
@@ -441,9 +441,9 @@ Exit codes for `run`:
 - `format_version` (currently `1`; files with a newer version are rejected)
 - `name`, `description`, `prompt` (system, template, temperature, max_tokens, extra_params) and `cases` (input, document paths, notes, expectation)
 - `accepted_model` (`provider:model`) and `accepted_outputs` (case name to the accepted run's output), when the harness has an accepted run
-- with `--inline-documents` (or the checkbox in the TUI export dialog): each case's documents themselves, so the file works on another machine. Files that are valid UTF-8 text (which includes a PDF that happens to be plain ASCII) go into `document_texts` (`name`, `text`) and every other file (PDF, Word, images, ...) into `document_files` (`name`, `mime`, `base64`). Each file is limited to 10 MB; a larger one stops the export with an error naming it
+- with `--inline-documents` (or the checkbox in the TUI export dialog): each case's documents themselves, so the file works on another machine. Files that are valid UTF-8 text (which includes a PDF that happens to be plain ASCII) go into `document_texts` (`name`, `text`) and every other file (PDF, Word, images, text that YAML cannot carry byte for byte, ...) into `document_files` (`name`, `mime`, `base64`). The case's `documents` list and these entries use bare file names, not your local paths (two different files that share a name become `report.pdf` and `2_report.pdf`); a file used by several cases keeps one name. Each file is limited to 10 MB; a larger one stops the export with an error naming it
 
-Provider settings, env var names, keys, run history and verdicts are **not** exported. On import, inline documents (text or binary) that do not exist at their original path are written under `<data dir>/documents/<harness name>/` and the case is repointed there. If the file has `accepted_outputs`, they become an accepted run for `accepted_model`; those restored outputs carry no check results, so their status is `manual`. Importing a name that exists fails unless you pass `--overwrite` (or confirm in the TUI). An imported harness may reference local document paths; when it runs, those files' contents are sent to the provider you run it against, so review a harness from someone else (its cases' document paths) before running it.
+Provider settings, env var names, keys, run history and verdicts are **not** exported. On import, inline documents (text or binary) are written under `<data dir>/documents/<harness name>/`, once per distinct file, and the cases are repointed there; a file with the same name in the directory you import from is never used instead. (Files exported by older versions carried absolute paths; an absolute path that exists on the importing machine is kept as it is.) If the file has `accepted_outputs`, they become an accepted run for `accepted_model`; those restored outputs carry no check results, so their status is `manual`. Importing a name that exists fails unless you pass `--overwrite` (or confirm in the TUI). An imported harness may reference local document paths; when it runs, those files' contents are sent to the provider you run it against, so review a harness from someone else (its cases' document paths) before running it.
 
 A second bundled example with two tiny cases is `summarize` ([source](src/promptharness/examples/summarize.harness.yaml)); `promptharness examples` lists everything bundled:
 

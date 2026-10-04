@@ -296,7 +296,8 @@ def test_export_inline_documents_then_import_binary(setup, tmp_path):
     from docfixtures import make_pdf
     setup([])
     pdf = tmp_path / "doc.pdf"
-    pdf.write_bytes(make_pdf(["Hello pdf"]) + b"\n%\xe2\xe3\xcf\xd3\n")
+    original = make_pdf(["Hello pdf"]) + b"\n%\xe2\xe3\xcf\xd3\n"
+    pdf.write_bytes(original)
     db = _db()
     h = db.get_harness("h")
     h.cases[0].documents = [str(pdf)]
@@ -314,4 +315,4 @@ def test_export_inline_documents_then_import_binary(setup, tmp_path):
     restored = _db().get_harness("h").cases[0].documents[0]
     assert os.path.exists(restored)
     assert restored != str(pdf)
-    assert open(restored, "rb").read().startswith(b"%PDF")
+    assert open(restored, "rb").read() == original

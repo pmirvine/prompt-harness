@@ -44,6 +44,13 @@ def export_harness(
         del body["prompt"]["documents_name"]
     data.update(body)
     if inline_documents:
+        # Bare, unique file names: an inline export must not leak local paths.
+        names: dict[str, str] = {}
+        used: set[str] = set()
+        for case in h.cases:
+            for path in case.documents:
+                if path not in names:
+                    names[path] = _unique_name(_safe_component(path), used)
         for case_dict, case in zip(data["cases"], h.cases, strict=True):
             texts = []
             files = []
@@ -57,18 +64,18 @@ def export_harness(
                     raise PortableError(
                         f"document {path} is larger than 10 MB and cannot be inlined"
                     )
-                try:
-                    if b"\x00" in raw:
-                        raise UnicodeDecodeError("utf-8", b"", 0, 1, "NUL byte")
-                    texts.append({"name": path, "text": raw.decode("utf-8")})
-                except UnicodeDecodeError:
+                text = _inline_text(raw)
+                if text is not None:
+                    texts.append({"name": names[path], "text": text})
+                else:
                     files.append(
                         {
-                            "name": path,
+                            "name": names[path],
                             "mime": mimetypes.guess_type(path)[0] or "application/octet-stream",
                             "base64": base64.b64encode(raw).decode("ascii"),
                         }
                     )
+            case_dict["documents"] = [names[p] for p in case.documents]
             case_dict["document_texts"] = texts
             if files:
                 case_dict["document_files"] = files
@@ -165,6 +172,33 @@ def _safe_component(name: str) -> str:
     return base
 
 
+def _unique_name(fname: str, used: set[str]) -> str:
+    """Return `fname`, or `2_fname`, `3_fname`, ... - the first one not in `used` (added)."""
+    candidate, n = fname, 2
+    while candidate in used:
+        candidate = f"{n}_{fname}"
+        n += 1
+    used.add(candidate)
+    return candidate
+
+
+def _inline_text(raw: bytes) -> str | None:
+    """The text to inline as `document_texts`, or None to inline the bytes as a file.
+
+    Text must be UTF-8 without NUL bytes and survive a YAML dump/load unchanged (e.g.
+    U+0085 does not); the same rule is used for JSON exports so both formats agree.
+    """
+    if b"\x00" in raw:
+        return None
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    if yaml.safe_load(yaml.safe_dump(text, allow_unicode=True)) != text:
+        return None
+    return text
+
+
 def _restore_documents(
     harness: Harness,
     doc_texts: dict[str, dict[str, str]],
@@ -173,26 +207,32 @@ def _restore_documents(
     doc_files = doc_files or {}
     root = home_dir() / "documents" / _safe_component(harness.name)
     used: set[str] = set()
+    written: dict[tuple[str, bytes], str] = {}
     cases = []
     for case in harness.cases:
         texts = doc_texts.get(case.name, {})
         files = doc_files.get(case.name, {})
         new_docs = []
         for path in case.documents:
-            if os.path.exists(path) or (path not in texts and path not in files):
+            if path in texts:
+                data = texts[path].encode("utf-8")
+            elif path in files:
+                data = files[path]
+            else:
                 new_docs.append(path)
                 continue
-            fname = _safe_component(path)
-            if fname in used:
-                fname = f"{len(used)}_{fname}"
-            used.add(fname)
-            root.mkdir(parents=True, exist_ok=True)
-            target = root / fname
-            if path in texts:
-                target.write_text(texts[path], encoding="utf-8")
-            else:
-                target.write_bytes(files[path])
-            new_docs.append(str(target))
+            # Legacy exports carried absolute paths: keep them if the file is still there.
+            # Bare names are never resolved against the current directory.
+            if os.path.isabs(path) and os.path.exists(path):
+                new_docs.append(path)
+                continue
+            key = (path, data)
+            if key not in written:
+                root.mkdir(parents=True, exist_ok=True)
+                target = root / _unique_name(_safe_component(path), used)
+                target.write_bytes(data)
+                written[key] = str(target)
+            new_docs.append(written[key])
         cases.append(case.model_copy(update={"documents": new_docs}))
     return harness.model_copy(update={"cases": cases})
 

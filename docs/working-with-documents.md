@@ -297,7 +297,7 @@ A harness file normally lists its documents as paths on your machine, which mean
 
 ![The Export dialog with Inline document contents ticked](screenshots/documents-guide/15-export.png)
 
-The file now contains a copy of each document: the PDF as text (it happens to be plain text inside), and the Word file and the image as base64 data, about 69 KB in all. The prompt keeps `documents_name: doc`. When someone imports the file (`1`, then `i`, or `promptharness import invoice-totals.yaml`) and the original paths do not exist on their machine, PromptHarness writes the documents to `documents/invoice-totals/` in their data directory and points the case at them, so the harness runs straight away. Each inlined file can be at most 10 MB. The same from the command line:
+The file now contains a copy of each document: the PDF as text (it happens to be plain text inside), and the Word file and the image as base64 data, about 69 KB in all. The prompt keeps `documents_name: doc`. The documents are listed by bare file name (`invoice-1041.docx`, ...), so the file does not reveal your folders. When someone imports the file (`1`, then `i`, or `promptharness import invoice-totals.yaml`), PromptHarness writes the documents to `documents/invoice-totals/` in their data directory and points the case at them, so the harness runs straight away. Each inlined file can be at most 10 MB. The same from the command line:
 
 ```sh
 promptharness export invoice-totals --inline-documents --out invoice-totals.yaml

@@ -232,3 +232,37 @@ def test_committed_examples_contain_no_local_paths(name):
             assert "/" not in n and "\\" not in n and "tmp" not in n.lower()
         for t in [*c.get("document_texts", []), *c.get("document_files", [])]:
             assert "/" not in t["name"] and "tmp" not in t["name"].lower()
+
+
+def test_three_documents_cli_import_restores_three_files_without_prefixes(monkeypatch):
+    import asyncio
+    import re
+
+    from conftest import FakeClient
+    from typer.testing import CliRunner
+
+    from promptharness import cli, paths
+    from promptharness.core.judge import run_judge
+    from promptharness.core.models import Provider
+
+    r = CliRunner().invoke(cli.app, ["import", "--example", "three-documents"])
+    assert r.exit_code == 0, r.output
+    h = Database(paths.db_path()).get_harness("three-documents")
+    restored = sorted(p.name for p in (paths.home_dir() / "documents" / "three-documents").iterdir())
+    assert restored == ["invoice-1041.txt", "invoice-1042.txt", "invoice-1043.txt"]
+    assert h.cases[0].documents == h.cases[1].documents
+    names = ["invoice-1041.txt", "invoice-1042.txt", "invoice-1043.txt"]
+    fake = FakeClient(['{"pass": true, "reason": "ok"}'])
+    for c in h.cases:
+        docs = load_documents(c.documents)
+        assert [d.name for d in docs] == names
+        out = render_user(h.prompt.template, c.input, docs)
+        assert all(n in out for n in names)
+        assert not re.search(r"\d_invoice-", out)
+    case = _case(h, "largest-invoice")
+    docs = load_documents(case.documents)
+    asyncio.run(run_judge(fake, Provider(name="p", base_url="http://x", api_key_env="K"), "m",
+                          case.expectation.judge_prompt, case.input, "1043", docs))
+    judge_text = json.dumps(fake.calls[0]["messages"])
+    assert all(n in judge_text for n in names)
+    assert not re.search(r"\d_invoice-", judge_text)
