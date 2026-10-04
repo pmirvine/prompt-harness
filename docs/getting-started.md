@@ -133,7 +133,7 @@ Edit `.env` and replace the placeholder for your provider, for example `OPENAI_A
 
 **`error — auth: ...`.** The server rejected the key. Check the value in `.env`, and that the provider's base URL matches the key.
 
-**`error — timeout`.** The model did not answer within 60 seconds. Large models, or a server that has to load a model first, can be slow. Try a smaller model, or run it once so the server has it loaded.
+**`error — timeout`.** The model did not answer within the provider's timeout (60 seconds by default). Large models, or a server that has to load a model first, can be slow. Try a smaller model, or run it once so the server has it loaded. To wait longer, raise the provider's timeout: `promptharness provider add lmstudio --timeout 300`, or press `4`, select the provider, press `e` and fill in **Timeout (s)**. The error only appears after the retries (two by default, **Max retries** in the same form), so with the default 60 seconds it takes about three minutes.
 
 **LM Studio refuses to load a model ("insufficient system resources").** LM Studio's memory guard is stopping a load that would not fit. Lower that model's context length in LM Studio, or unload other models first.
 

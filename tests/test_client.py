@@ -342,3 +342,17 @@ async def test_normal_stop_has_no_warnings(monkeypatch):
     FakeOpenAI.script = [_completion("ok", finish_reason="stop", reasoning="thinking")]
     res = await OpenAIChatClient().chat(PROVIDER_NOKEY, "m", MSGS, PromptVersion(template="x"))
     assert res.warnings == []
+
+
+async def test_explicit_small_timeout_is_respected():
+    await OpenAIChatClient().chat(provider(timeout=0.5), "m", MSGS, {"temperature": 0})
+    init = FakeOpenAI.instances[0].init_kwargs
+    assert init["timeout"] == 0.5 and init["max_retries"] == 2
+
+
+def test_make_client_uses_stored_values_and_zero_is_not_replaced():
+    c = client_mod._make_client(provider(timeout=0.0, max_retries=0))
+    assert c.init_kwargs["timeout"] == 0.0
+    assert c.init_kwargs["max_retries"] == 0
+    c = client_mod._make_client(provider(timeout=300.0, max_retries=5))
+    assert (c.init_kwargs["timeout"], c.init_kwargs["max_retries"]) == (300.0, 5)

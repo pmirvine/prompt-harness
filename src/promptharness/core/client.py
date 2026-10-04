@@ -87,7 +87,7 @@ def _make_client(provider: Provider) -> AsyncOpenAI:
         base_url=provider.base_url,
         api_key=key,
         default_headers=provider.headers,
-        timeout=provider.timeout or 60,
+        timeout=provider.timeout if provider.timeout is not None else 60,
         max_retries=provider.max_retries if provider.max_retries is not None else 2,
     )
 

@@ -316,3 +316,28 @@ def test_export_inline_documents_then_import_binary(setup, tmp_path):
     assert os.path.exists(restored)
     assert restored != str(pdf)
     assert open(restored, "rb").read() == original
+
+
+def test_provider_add_timeout_and_max_retries():
+    r = runner.invoke(cli.app, ["provider", "add", "lm", "--base-url", "http://a/v1",
+                                "--timeout", "300", "--max-retries", "0"])
+    assert r.exit_code == 0, r.output
+    got = _db().get_provider("lm")
+    assert (got.timeout, got.max_retries) == (300.0, 0)
+    r = runner.invoke(cli.app, ["provider", "add", "lm", "--timeout", "12.5"])
+    assert r.exit_code == 0, r.output
+    got = _db().get_provider("lm")
+    assert (got.timeout, got.max_retries, got.base_url) == (12.5, 0, "http://a/v1")
+    r = runner.invoke(cli.app, ["provider", "add", "lm", "--max-retries", "4"])
+    got = _db().get_provider("lm")
+    assert (got.timeout, got.max_retries) == (12.5, 4)
+
+
+@pytest.mark.parametrize("args", [
+    ["--timeout", "0"], ["--timeout", "-1"], ["--timeout", "nan"], ["--timeout", "inf"],
+    ["--timeout", "abc"], ["--max-retries", "-1"], ["--max-retries", "1.5"],
+])
+def test_provider_add_invalid_timeout_or_retries_exit_two(args):
+    r = runner.invoke(cli.app, ["provider", "add", "lm", "--base-url", "http://a/v1", *args])
+    assert r.exit_code == 2, r.output
+    assert _db().get_provider("lm") is None

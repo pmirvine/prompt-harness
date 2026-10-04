@@ -199,10 +199,11 @@ promptharness provider add groq       --base-url https://api.groq.com/openai/v1 
 promptharness provider add together   --base-url https://api.together.xyz/v1    --api-key-env TOGETHER_API_KEY
 promptharness provider add vllm       --base-url http://localhost:8000/v1
 promptharness provider add ollama     --base-url http://localhost:11434/v1
+promptharness provider add lmstudio   --base-url http://localhost:1234/v1 --timeout 300
 promptharness provider list
 ```
 
-`provider add` on an existing name updates only the options you pass and keeps the rest (including whether it is enabled); it prints `Added` or `Updated`. `--max-tokens-param max_completion_tokens` (also a choice in the TUI form) sends the token limit as `max_completion_tokens`, which some newer OpenAI models require. If a provider rejects a parameter (for example `temperature`), the request is retried without it and the result carries a `dropped param: ...` warning. Models are referred to everywhere as `provider:model`, for example `openai:gpt-4o-mini` or `ollama:llama3.2`.
+`provider add` on an existing name updates only the options you pass and keeps the rest (including whether it is enabled); it prints `Added` or `Updated`. `--max-tokens-param max_completion_tokens` (also a choice in the TUI form) sends the token limit as `max_completion_tokens`, which some newer OpenAI models require. Each request waits 60 seconds and is retried twice by default; `--timeout SECONDS` (greater than 0) and `--max-retries N` (0 or more) change that for one provider, for example `promptharness provider add lmstudio --timeout 300` for a slow local model (the Providers form has the same two fields, blank meaning the default). If a provider rejects a parameter (for example `temperature`), the request is retried without it and the result carries a `dropped param: ...` warning. Models are referred to everywhere as `provider:model`, for example `openai:gpt-4o-mini` or `ollama:llama3.2`.
 
 ## Key bindings
 
@@ -418,7 +419,8 @@ promptharness export NAME [--format yaml|json] [--inline-documents] [--out FILE]
 promptharness import FILE [--overwrite]
 promptharness import --example NAME [--overwrite]
 promptharness examples
-promptharness provider add NAME --base-url URL [--api-key-env VAR] [--max-tokens-param max_tokens|max_completion_tokens]
+promptharness provider add NAME --base-url URL [--api-key-env VAR] [--max-tokens-param max_tokens|max_completion_tokens] \
+    [--timeout SECONDS] [--max-retries N]
 promptharness provider list
 ```
 
