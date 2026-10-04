@@ -268,8 +268,8 @@ A case ends with one of these statuses:
 |--------|---------|
 | `pass` | At least one check ran and all passed, or a manual verdict of pass |
 | `fail` | A check failed, or a manual verdict of fail |
-| `error` | The request itself failed (auth, timeout, rate limit, missing env var, unknown or disabled provider, unreadable document, template error) |
-| `judge_error` | Deterministic checks passed but the judge failed or was unavailable (malformed output twice, request error, judge provider unknown or disabled) |
+| `error` | A request failed (auth, timeout, rate limit, missing env var, unknown or disabled provider, unreadable document, template error), including the judge's request, which reads `<kind>: judge request failed: ...` |
+| `judge_error` | Deterministic checks passed but the judge could not give a verdict: it returned malformed output twice, the judge prompt template failed to render, or the judge provider is unknown or disabled |
 | `manual` | No checks decided the outcome: nothing to check automatically. Review the output and set a verdict with `v` |
 
 Precedence: `error` first; then any failed check or a manual fail gives `fail`; then a manual pass gives `pass` (so a manual pass resolves `manual` and `judge_error` but cannot override a failed check). Provider failures are shown per case and never crash the app.

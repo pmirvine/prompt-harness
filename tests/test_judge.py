@@ -142,7 +142,7 @@ async def test_plain_prompt_and_json_braces_render_unchanged():
     assert 'Criteria:\nReply like {"pass": true}\n\n' in c.calls[0]["messages"][1]["content"]
 
 
-@pytest.mark.parametrize("prompt", ["{{ nope }}", "literal {{ here"])
+@pytest.mark.parametrize("prompt", ["{{ nope }}", "literal {{ here", "{# no close", "a lone {% here"])
 async def test_template_error_is_judge_error(prompt):
     c = FakeClient([_OK])
     with pytest.raises(JudgeError, match="^judge prompt template error"):

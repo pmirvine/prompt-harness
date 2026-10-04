@@ -66,7 +66,8 @@ async def _evaluate(
     client: ChatClient,
     judge: tuple[Provider, str] | None,
 ) -> CaseResult:
-    docs = load_documents(case.documents)
+    # Readers can be slow (PDF, LibreOffice); keep the event loop (and the TUI) free.
+    docs = await asyncio.to_thread(load_documents, case.documents)
     user = render_user(prompt.template, case.input, docs, prompt.documents_name)
     messages: list[dict] = []
     if prompt.system:
@@ -114,7 +115,7 @@ async def _evaluate(
             judge_warning = str(e)
         except ClientError as e:
             hinted = _with_image_hint(e, has_images)
-            error = f"{hinted.kind}: {hinted}"
+            error = f"{hinted.kind}: judge request failed: {hinted}"
 
     return CaseResult(
         case_name=case.name,

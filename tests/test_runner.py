@@ -133,7 +133,7 @@ async def test_judge_error_status_on_malformed_judge():
 async def test_judge_client_error_is_case_error():
     c = case(judge_prompt="good?")
     r, _ = await ev(c, ["hi", ClientError("auth", "no")], judge=(PROV, "j"))
-    assert r.status == "error" and r.error.startswith("auth: ")
+    assert r.status == "error" and r.error == "auth: judge request failed: no"
 
 
 async def test_concurrency_limit_respected():
@@ -410,14 +410,16 @@ async def test_non_vision_judge_hint(tmp_path):
     )
     r, _ = await ev(c, ["ok", ClientError("other", "400 bad request")], judge=(PROV, "j"))
     assert r.status == "error"
-    assert r.error == "other: 400 bad request (the model may not support image input)"
+    assert r.error == (
+        "other: judge request failed: 400 bad request (the model may not support image input)"
+    )
     r, _ = await ev(
         case(judge_prompt="good?"), ["ok", ClientError("other", "400 bad request")],
         judge=(PROV, "j"),
     )
-    assert r.error == "other: 400 bad request"
+    assert r.error == "other: judge request failed: 400 bad request"
     r, _ = await ev(c, ["ok", ClientError("auth", "no key")], judge=(PROV, "j"))
-    assert r.error == "auth: no key"
+    assert r.error == "auth: judge request failed: no key"
 
 
 async def test_stored_run_has_no_base64(tmp_path):
@@ -458,3 +460,31 @@ async def test_judge_template_error_gives_judge_error_status():
     assert r.status == "judge_error"
     assert any("judge prompt template error" in w for w in r.warnings)
     assert len(client.calls) == 1
+
+
+async def test_document_loading_does_not_block_the_event_loop(tmp_path, monkeypatch):
+    import time
+
+    from promptharness.core import runner as runner_mod
+    from promptharness.core.render import load_documents as real_load
+
+    state = {"ticks": 0, "ticks_seen_by_loader": None}
+
+    def slow_load(paths):
+        time.sleep(0.3)
+        state["ticks_seen_by_loader"] = state["ticks"]
+        return real_load(paths)
+
+    monkeypatch.setattr(runner_mod, "load_documents", slow_load)
+
+    async def ticker():
+        for _ in range(100):
+            state["ticks"] += 1
+            await asyncio.sleep(0.01)
+
+    tick_task = asyncio.create_task(ticker())
+    await asyncio.sleep(0)
+    r, _ = await ev(case(), ["ok"])
+    tick_task.cancel()
+    assert r.status == "manual"
+    assert state["ticks_seen_by_loader"] >= 10, state

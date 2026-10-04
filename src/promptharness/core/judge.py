@@ -4,13 +4,11 @@ import json
 import re
 from collections.abc import Sequence
 
-from jinja2 import StrictUndefined, TemplateError
-from jinja2.sandbox import SandboxedEnvironment
-
 from promptharness.core.client import ChatClient
 from promptharness.core.documents import Document
 from promptharness.core.messages import build_user_content
 from promptharness.core.models import CheckResult, Provider
+from promptharness.core.render import TemplateRenderError, render_template
 
 SYSTEM_PROMPT = (
     "You are a strict evaluator. Judge whether the OUTPUT satisfies the criteria. "
@@ -46,15 +44,12 @@ def _parse(text: str) -> tuple[bool, str] | None:
 def _render_criteria(
     judge_prompt: str, case_input: str, output: str, documents: Sequence[Document], name: str
 ) -> str:
-    env = SandboxedEnvironment(undefined=StrictUndefined)
     try:
-        return env.from_string(judge_prompt).render(
-            {"input": case_input, "output": output, name: list(documents)}
+        return render_template(
+            judge_prompt, {"input": case_input, "output": output, name: list(documents)}
         )
-    except TemplateError as e:
+    except TemplateRenderError as e:
         raise JudgeError(f"judge prompt template error: {e}") from e
-    except Exception as e:  # sandbox security errors, attribute errors in templates
-        raise JudgeError(f"judge prompt template error: {type(e).__name__}: {e}") from e
 
 
 async def run_judge(

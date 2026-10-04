@@ -80,3 +80,12 @@ def test_render_with_custom_name():
 def test_render_passes_variables_as_dict():
     docs = [Document(name="a.txt", text="A")]
     assert render_user("{{ input }}{{ files[0].text }}", "hi", docs, "files") == "hiA"
+
+
+def test_render_template_shared_helper():
+    from promptharness.core.render import render_template
+
+    assert render_template("{{ a }}-{{ b }}", {"a": 1, "b": "x"}) == "1-x"
+    for bad in ("{{ nope }}", "{% if %}", "{# no close", "{%", "{{ ''.__class__.__mro__ }}"):
+        with pytest.raises(TemplateRenderError):
+            render_template(bad, {})
