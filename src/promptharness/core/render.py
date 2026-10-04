@@ -1,42 +1,15 @@
 from __future__ import annotations
 
-import os
-from dataclasses import dataclass
-
 from jinja2 import StrictUndefined, TemplateError
 from jinja2.sandbox import SandboxedEnvironment
 
+from promptharness.core.documents import Document, DocumentError, load_documents
 
-@dataclass(frozen=True)
-class Document:
-    name: str
-    text: str
-
-
-class DocumentError(Exception):
-    pass
+__all__ = ["Document", "DocumentError", "TemplateRenderError", "load_documents", "render_user"]
 
 
 class TemplateRenderError(Exception):
     pass
-
-
-def load_documents(paths: list[str]) -> list[Document]:
-    docs: list[Document] = []
-    for p in paths:
-        try:
-            with open(p, "rb") as f:
-                data = f.read()
-        except OSError as e:
-            raise DocumentError(f"unsupported: {p}: cannot read ({e.strerror or e})") from e
-        if b"\x00" in data:
-            raise DocumentError(f"unsupported: {p}: binary file")
-        try:
-            text = data.decode("utf-8")
-        except UnicodeDecodeError as e:
-            raise DocumentError(f"unsupported: {p}: not valid UTF-8 text") from e
-        docs.append(Document(name=os.path.basename(p), text=text))
-    return docs
 
 
 def render_user(template: str, input: str, documents: list[Document]) -> str:
