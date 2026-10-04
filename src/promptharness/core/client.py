@@ -9,6 +9,7 @@ from typing import Any, Literal, Protocol
 import openai
 from openai import AsyncOpenAI
 
+from promptharness.core.messages import redact_images
 from promptharness.core.models import PromptVersion, Provider
 
 ErrorKind = Literal["auth", "timeout", "rate_limit", "config", "other"]
@@ -193,7 +194,7 @@ class OpenAIChatClient:
             request={
                 "base_url": provider.base_url,
                 "model": model,
-                "messages": messages,
+                "messages": redact_images(messages),
                 "params": call_params,
             },
             response=response,
