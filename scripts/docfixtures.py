@@ -117,7 +117,6 @@ _ODF_NS = (
 
 
 def _odf(body: str, mime: str) -> bytes:
-    from xml.sax.saxutils import escape  # noqa: F401  (callers escape first)
     import zipfile
 
     content = (

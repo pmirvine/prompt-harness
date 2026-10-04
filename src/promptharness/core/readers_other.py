@@ -7,10 +7,13 @@ import subprocess
 import tempfile
 import zipfile
 from xml.etree import ElementTree as ET
+from xml.parsers import expat
 
 from promptharness.core.documents import ReadError, ReadResult, register
 
 MAX_SHEET_ROWS = 5000
+MAX_ODF_XML_BYTES = 50 * 1024 * 1024
+MAX_REPEAT = 1000
 
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 XLS_MIME = "application/vnd.ms-excel"
@@ -70,6 +73,22 @@ def read_xlsx(data: bytes, name: str) -> ReadResult:
         wb.close()
 
 
+def _xls_cell(book, cell):
+    import xlrd
+
+    t, v = cell.ctype, cell.value
+    if t == xlrd.XL_CELL_BOOLEAN:
+        return str(bool(v))
+    if t == xlrd.XL_CELL_ERROR:
+        return xlrd.error_text_from_code.get(v, f"#ERR{v}")
+    if t == xlrd.XL_CELL_DATE:
+        try:
+            return str(xlrd.xldate.xldate_as_datetime(v, book.datemode))
+        except (xlrd.xldate.XLDateError, ValueError, OverflowError):
+            return _cell_text(v)
+    return _cell_text(v)
+
+
 @register(".xls")
 def read_xls(data: bytes, name: str) -> ReadResult:
     import xlrd
@@ -81,23 +100,58 @@ def read_xls(data: bytes, name: str) -> ReadResult:
     warnings: list[str] = []
     blocks = []
     for sh in book.sheets():
-        rows = (sh.row_values(r) for r in range(sh.nrows))
+        rows = (
+            [_xls_cell(book, sh.cell(r, c)) for c in range(sh.ncols)] for r in range(sh.nrows)
+        )
         blocks.append(_sheet_block(sh.name, rows, name, warnings))
     return ReadResult(
         text="\n\n".join(blocks), mime=XLS_MIME, pages=len(blocks), warnings=tuple(warnings)
     )
 
 
+class _Unsafe(Exception):
+    pass
+
+
+def _reject(*_args):
+    raise _Unsafe
+
+
+def _check_no_dtd(data: bytes) -> None:
+    """Reject DOCTYPE/ENTITY using expat, so any encoding (e.g. UTF-16) is handled."""
+    p = expat.ParserCreate()
+    p.StartDoctypeDeclHandler = _reject
+    p.EntityDeclHandler = _reject
+    p.ExternalEntityRefHandler = _reject
+    p.Parse(data, True)
+
+
 def _content_root(data: bytes) -> ET.Element:
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as z:
-            return ET.fromstring(z.read("content.xml"))
-    except (zipfile.BadZipFile, KeyError, ET.ParseError) as e:
+            if z.getinfo("content.xml").file_size > MAX_ODF_XML_BYTES:
+                raise ReadError("content.xml is too large")
+            xml = z.read("content.xml")
+    except (zipfile.BadZipFile, KeyError) as e:
+        raise ReadError("not a valid OpenDocument file") from e
+    try:
+        _check_no_dtd(xml)
+        return ET.fromstring(xml)
+    except _Unsafe as e:
+        raise ReadError("unsafe XML: DTD and entity declarations are not allowed") from e
+    except (expat.ExpatError, ET.ParseError) as e:
         raise ReadError("not a valid OpenDocument file") from e
 
 
+_PARA_TAGS = {_q("text", "p"), _q("text", "h")}
+
+
 def _para_text(el: ET.Element) -> str:
-    """Text of a text:p / text:h, honouring spaces, tabs and line breaks."""
+    """Text of a text:p / text:h, honouring spaces, tabs and line breaks.
+
+    Nested paragraphs (e.g. in a draw:text-box inside this paragraph) are skipped
+    here; _paragraphs emits them as their own lines right after the outer paragraph.
+    """
     out: list[str] = []
 
     def walk(e: ET.Element) -> None:
@@ -110,6 +164,8 @@ def _para_text(el: ET.Element) -> str:
                 out.append("\t")
             elif ch.tag == _q("text", "line-break"):
                 out.append("\n")
+            elif ch.tag in _PARA_TAGS:
+                pass
             else:
                 walk(ch)
             if ch.tail:
@@ -120,8 +176,7 @@ def _para_text(el: ET.Element) -> str:
 
 
 def _paragraphs(root: ET.Element) -> list[str]:
-    tags = {_q("text", "p"), _q("text", "h")}
-    return [_para_text(e) for e in root.iter() if e.tag in tags]
+    return [_para_text(e) for e in root.iter() if e.tag in _PARA_TAGS]
 
 
 @register(".odt")
@@ -131,20 +186,46 @@ def read_odt(data: bytes, name: str) -> ReadResult:
     return ReadResult(text="\n".join(paras), mime=ODT_MIME)
 
 
+def _repeat(el: ET.Element, attr: str) -> int:
+    try:
+        return max(1, int(el.get(_q("table", attr), "1")))
+    except ValueError:
+        return 1
+
+
+def _ods_rows(tbl: ET.Element):
+    """Yield rows, expanding repeats of non-empty cells/rows (capped at MAX_REPEAT).
+
+    Repeats of empty cells/rows are not expanded and trailing empties are dropped.
+    """
+    pending_blank = 0
+    for row in tbl.iter(_q("table", "table-row")):
+        cells: list[str] = []
+        for cell in row.findall(_q("table", "table-cell")):
+            text = "\n".join(_para_text(p) for p in cell.findall(_q("text", "p")))
+            n = min(_repeat(cell, "number-columns-repeated"), MAX_REPEAT) if text else 1
+            cells.extend([text] * n)
+        while cells and not cells[-1]:
+            cells.pop()
+        if not cells:
+            pending_blank += 1
+            continue
+        for _ in range(pending_blank):
+            yield []
+        pending_blank = 0
+        for _ in range(min(_repeat(row, "number-rows-repeated"), MAX_REPEAT)):
+            yield cells
+
+
 @register(".ods")
 def read_ods(data: bytes, name: str) -> ReadResult:
     root = _content_root(data)
     warnings: list[str] = []
     blocks = []
     for tbl in root.iter(_q("table", "table")):
-        rows = (
-            [
-                "\n".join(_para_text(p) for p in cell.findall(_q("text", "p")))
-                for cell in row.findall(_q("table", "table-cell"))
-            ]
-            for row in tbl.iter(_q("table", "table-row"))
+        blocks.append(
+            _sheet_block(tbl.get(_q("table", "name"), ""), _ods_rows(tbl), name, warnings)
         )
-        blocks.append(_sheet_block(tbl.get(_q("table", "name"), ""), rows, name, warnings))
     return ReadResult(
         text="\n\n".join(blocks), mime=ODS_MIME, pages=len(blocks), warnings=tuple(warnings)
     )
@@ -172,7 +253,7 @@ def read_rtf(data: bytes, name: str) -> ReadResult:
 
 def _run(cmd: list[str]) -> subprocess.CompletedProcess:
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        proc = subprocess.run(cmd, capture_output=True, text=True, errors="replace", timeout=60)
     except subprocess.TimeoutExpired as e:
         raise ReadError("conversion timed out after 60 seconds") from e
     except OSError as e:
