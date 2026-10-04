@@ -15,6 +15,42 @@ Nothing leaves your machine except requests to the provider base URLs you config
 - **Headless:** `promptharness run` exits non-zero on failures, so it works in CI.
 - **Portable:** harnesses export to YAML or JSON so they can live in git. API keys are never stored, only the names of the environment variables that hold them.
 
+## Screenshots
+
+The screenshots show real results: the outputs, token counts and latencies come from runs of the [starter harness](#the-starter-test-case) against models served by LM Studio. The one exception is the `openai:gpt-4o-mini` row on the Runs tab, which is the accepted output bundled with the example harness. `scripts/make_screenshots.py` regenerates them.
+
+**Harnesses** list saved prompts with their accepted model. `enter` opens one in the Studio and `m` starts a regression run.
+
+![The Harnesses tab listing two saved harnesses](docs/screenshots/harnesses.png)
+
+**Studio:** edit the system prompt and template, keep a list of cases, and run one or all. Each result shows the output, token usage, latency and every check with its reason.
+
+![The Studio running the quickstart harness, with outputs and passing checks](docs/screenshots/studio.png)
+
+**Regression matrix:** one column per model and one row per case. `enter` opens a result and `c` compares a case across models.
+
+![A case by model matrix with every cell passing](docs/screenshots/matrix.png)
+
+**Result detail** shows the full output and which checks passed. Here the Gemma build wrapped its JSON in a markdown code fence, which the JSON check accepts.
+
+![A result view showing fenced JSON output and passing json and json_schema checks](docs/screenshots/result-detail.png)
+
+**Compare** puts the accepted output first and the other models beside it, so you can see how a replacement model's answer differs.
+
+![Three panes comparing the accepted output with two other models' output for the same case](docs/screenshots/compare.png)
+
+**Warnings explain failures.** A reasoning model can use its whole token budget on hidden reasoning and return an empty answer. The result says so instead of only reporting that a pattern was not found.
+
+![A failed result with a warning that the model ran out of tokens while reasoning](docs/screenshots/result-warning.png)
+
+**Runs** keeps the history of every run, with counts per status. Mark several with `space` to view them side by side, or press `r` to re-test a past run on a different model.
+
+![The Runs tab listing five runs with pass, fail and manual counts](docs/screenshots/runs.png)
+
+**Providers** are any OpenAI-compatible endpoint. Only the name of the API key variable is stored, and local servers need none.
+
+![The Providers tab listing LM Studio, Ollama and OpenAI](docs/screenshots/providers.png)
+
 ## Install
 
 Requires Python 3.11+.
@@ -286,3 +322,12 @@ uv run pytest        # uv installs the dev dependency group (pytest, pytest-asyn
 ```
 
 The tests use a mocked LLM client and make no real API calls.
+
+To regenerate the screenshots in `docs/screenshots/` after changing the UI:
+
+```sh
+brew install librsvg                       # provides rsvg-convert, which turns Textual's SVG output into PNG
+uv run python scripts/make_screenshots.py
+```
+
+The script drives the real screens headlessly with Textual's test pilot, using a temporary data directory and recorded model outputs, so it needs no network, API keys or running model server.
