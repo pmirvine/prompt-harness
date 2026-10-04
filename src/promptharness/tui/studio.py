@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pydantic import ValidationError
 from rich.text import Text
 from textual import events, on
 from textual.app import ComposeResult
@@ -87,11 +88,14 @@ class StudioPane(StudioPersistMixin, Widget):
     # -- layout ---------------------------------------------------------
     def compose(self) -> ComposeResult:
         with Horizontal(id="studio-top"):
-            yield Select([], prompt="Model under test", id="model")
+            yield Select([], prompt="Model", id="model", tooltip="Model under test")
             yield Input(placeholder="provider:model (manual, Enter)", id="manual-model")
-            yield Select([], prompt="Judge: none", id="judge")
-            yield Input(placeholder="temperature", id="temperature")
-            yield Input(placeholder="max tokens", id="max_tokens")
+            yield Select([], prompt="Judge", id="judge", tooltip="Judge model (optional)")
+            yield Input(placeholder="temp", id="temperature", tooltip="Temperature")
+            yield Input(placeholder="max tok", id="max_tokens", tooltip="Max tokens")
+            yield Label("Docs as", id="documents-name-label")
+            yield Input(placeholder="documents", id="documents_name",
+                        tooltip="Template variable holding the case's documents")
         with Horizontal(id="studio-body"):
             with Vertical(id="studio-editors"):
                 yield Label("System prompt")
@@ -193,12 +197,18 @@ class StudioPane(StudioPersistMixin, Widget):
             except ValueError:
                 raise ValueError(f"{label} must be a number, got {raw!r}") from None
 
-        return PromptVersion(
-            system=self.query_one("#system", TextArea).text,
-            template=self.query_one("#template", TextArea).text,
-            temperature=num("#temperature", "Temperature", float),
-            max_tokens=num("#max_tokens", "Max tokens", int),
-        )
+        try:
+            return PromptVersion(
+                system=self.query_one("#system", TextArea).text,
+                template=self.query_one("#template", TextArea).text,
+                temperature=num("#temperature", "Temperature", float),
+                max_tokens=num("#max_tokens", "Max tokens", int),
+                documents_name=self.query_one("#documents_name", Input).value.strip()
+                or "documents",
+            )
+        except ValidationError as e:  # a ValueError, but with a verbose pydantic message
+            raise ValueError("; ".join(err["msg"].removeprefix("Value error, ")
+                                       for err in e.errors())) from None
 
     def _prompt_or_none(self) -> PromptVersion | None:
         try:
@@ -212,7 +222,7 @@ class StudioPane(StudioPersistMixin, Widget):
             self.history.push(p)
 
     @on(TextArea.Changed, "#system, #template")
-    @on(Input.Changed, "#temperature, #max_tokens")
+    @on(Input.Changed, "#temperature, #max_tokens, #documents_name")
     def _edited(self) -> None:
         if self._edit_timer is not None:
             self._edit_timer.stop()
@@ -228,6 +238,8 @@ class StudioPane(StudioPersistMixin, Widget):
             p.temperature)
         self.query_one("#max_tokens", Input).value = "" if p.max_tokens is None else str(
             p.max_tokens)
+        self.query_one("#documents_name", Input).value = (
+            "" if p.documents_name == "documents" else p.documents_name)
 
     def _step(self, forward: bool) -> None:
         if self._edit_timer is not None:

@@ -17,8 +17,11 @@ ProviderForm, ModelsForm { align: center middle; }
 StudioPane { height: 1fr; }
 #studio-top { height: 3; }
 #studio-top Select { width: 1fr; }
-#manual-model { width: 26; }
-#temperature, #max_tokens { width: 14; }
+#manual-model { width: 18; }
+#temperature { width: 10; }
+#max_tokens { width: 13; }
+#documents-name-label { width: auto; padding: 1 0 0 1; color: #8a93a3; }
+#documents_name { width: 15; }
 #studio-body { height: 1fr; }
 #studio-editors { width: 1fr; }
 #studio-editors Label, #studio-side Label { color: #8a93a3; }
