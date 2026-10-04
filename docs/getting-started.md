@@ -127,7 +127,7 @@ Edit `.env` and replace the placeholder for your provider, for example `OPENAI_A
 
 ## Troubleshooting
 
-**A test fails and the answer is empty.** Reasoning models spend part of the token limit thinking before they answer. If the limit is too small they return nothing, and the result shows a warning such as `empty answer: the model used its token limit ... raise max_tokens`. The starter harness already allows 2048 tokens. If you write your own harness, raise `max tokens` in the Studio.
+**A test fails and the answer is empty.** Reasoning models spend part of the token limit thinking before they answer. If the limit is too small they return nothing, and the result shows a warning such as `empty answer: the model used its token limit ... raise max_tokens`. The starter harness already allows 2048 tokens. If you write your own harness, raise the max tokens field (placeholder `max tok`) in the Studio.
 
 **`error — config: environment variable ... is not set`.** The provider names an API key variable that is not set. Put it in your `.env` file or export it in the shell you launched from, or leave the field blank for a local server.
 
@@ -142,6 +142,7 @@ Edit `.env` and replace the placeholder for your provider, for example `OPENAI_A
 ## Where to go next
 
 - Open the **Studio** (`2`) to write your own prompt, add test cases, try them against a model, and save the result as a harness. See [Screenshots](../README.md#screenshots) in the main README.
+- Follow [Working with documents](working-with-documents.md) to build a test that reads a Word file, a PDF and an image, from a vague first prompt to a checked, judged harness run on two models.
 - Re-run a saved harness against a different model to check it still behaves, or press `r` on the Runs tab to re-test a past run on a replacement model.
 - Read [Checks and statuses](../README.md#checks-and-statuses) to learn about regex checks, JSON Schema checks and the optional LLM judge.
 - Export a harness to YAML or JSON so it can live in git: [Export and import](../README.md#export-and-import).

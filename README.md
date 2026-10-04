@@ -6,7 +6,7 @@ You work out a prompt in a **studio** against a handful of test cases, save it a
 
 Nothing leaves your machine except requests to the provider base URLs you configure. There is no telemetry, cloud sync, account or web UI.
 
-**New here? Follow the [Getting started guide](docs/getting-started.md)** for a step-by-step walk-through of your first test run, with screenshots.
+**New here? Follow the [Getting started guide](docs/getting-started.md)** for a step-by-step walk-through of your first test run, with screenshots. Then [Working with documents](docs/working-with-documents.md) shows how to test a prompt that reads Word, PDF and image files.
 
 ## Features
 
@@ -275,7 +275,7 @@ Precedence: `error` first; then any failed check or a manual fail gives `fail`; 
 
 ## Documents
 
-A case can carry documents: files whose contents the template can put into the prompt. In the Studio case form (`n`, or `enter` on a case) list their paths, comma-separated, under "Document paths"; `~` is expanded and the paths are stored as absolute paths. In a harness file they are the case's `documents:` list (relative paths there are resolved against the directory you run `promptharness` from):
+A case can carry documents: files whose contents the template can put into the prompt. For a step-by-step walk-through with screenshots, see [Working with documents](docs/working-with-documents.md). In the Studio case form (`n`, or `enter` on a case) list their paths, comma-separated, under "Document paths"; `~` is expanded and the paths are stored as absolute paths. In a harness file they are the case's `documents:` list (relative paths there are resolved against the directory you run `promptharness` from):
 
 ```yaml
 cases:
